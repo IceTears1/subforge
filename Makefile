@@ -1,8 +1,16 @@
-.PHONY: build up down logs clean
+.PHONY: build up down logs clean deploy deploy-vps update-vps
 
-# One-click deploy
+# Local deploy
 deploy:
 	chmod +x deploy.sh && ./deploy.sh
+
+# VPS one-click deploy
+deploy-vps:
+	chmod +x deploy-vps.sh && ./deploy-vps.sh
+
+# VPS update
+update-vps:
+	chmod +x update-vps.sh && ./update-vps.sh
 
 # Build all images
 build:
