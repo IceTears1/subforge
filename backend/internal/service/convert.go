@@ -2,13 +2,14 @@ package service
 
 import (
 	"io"
-	"net/http"
 	"time"
 
 	"subforge/internal/core"
 	"subforge/internal/parser"
 	"subforge/internal/renderer"
 	"subforge/internal/smart"
+
+	"subforge/internal/pkg/httputil"
 
 	"gorm.io/gorm"
 )
@@ -35,8 +36,7 @@ func (s *ConvertService) Convert(req ConvertRequest) (string, error) {
 	var content string
 
 	if req.SourceURL != "" {
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Get(req.SourceURL)
+		resp, err := httputil.SafeGet(req.SourceURL, 30*time.Second)
 		if err != nil {
 			return "", err
 		}
@@ -82,8 +82,7 @@ func (s *ConvertService) Convert(req ConvertRequest) (string, error) {
 func (s *ConvertService) DetectFormat(source string) (string, int, error) {
 	var content string
 	if len(source) >= 4 && source[:4] == "http" {
-		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Get(source)
+		resp, err := httputil.SafeGet(source, 15*time.Second)
 		if err != nil {
 			return "", 0, err
 		}

@@ -9,6 +9,7 @@ import (
 type Subscription struct {
 	ID          uint           `json:"id" gorm:"primaryKey"`
 	UserID      uint           `json:"user_id" gorm:"index"`
+	Token       string         `json:"token" gorm:"uniqueIndex;size:32"` // public access token
 	Name        string         `json:"name" gorm:"size:128;not null"`
 	URL         string         `json:"url" gorm:"not null"`
 	AutoRefresh int            `json:"auto_refresh" gorm:"default:3600"`

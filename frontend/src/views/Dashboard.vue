@@ -35,28 +35,33 @@
         <n-card :bordered="false" class="stat-card">
           <n-statistic label="在线状态">
             <template #prefix>
-              <n-icon :component="PulseOutline" color="#10b981" />
+              <n-icon :component="PulseOutline" :color="stats.healthy ? '#10b981' : '#ef4444'" />
             </template>
-            正常
+            {{ stats.healthy ? '正常' : '异常' }}
           </n-statistic>
         </n-card>
       </n-gi>
     </n-grid>
 
     <n-card title="最近订阅" :bordered="false" style="margin-top: 24px">
-      <n-data-table :columns="columns" :data="recentSubs" :bordered="false" />
+      <n-alert v-if="error" type="error" style="margin-bottom: 16px">
+        {{ error }}
+      </n-alert>
+      <n-data-table :columns="columns" :data="recentSubs" :loading="loading" :bordered="false" />
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, h } from 'vue'
-import { NGrid, NGi, NCard, NStatistic, NIcon, NDataTable, NTag } from 'naive-ui'
+import { NGrid, NGi, NCard, NStatistic, NIcon, NDataTable, NTag, NAlert } from 'naive-ui'
 import { CloudOutline, ServerOutline, GlobeOutline, PulseOutline } from '@vicons/ionicons5'
-import { getSubscriptions } from '../api/subscription'
+import { getSubscriptions, getNodes } from '../api/subscription'
 import type { Subscription } from '../api/subscription'
 
-const stats = ref({ subscriptions: 0, nodes: 0, regions: 0 })
+const loading = ref(false)
+const error = ref('')
+const stats = ref({ subscriptions: 0, nodes: 0, regions: 0, healthy: true })
 const recentSubs = ref<Subscription[]>([])
 
 const columns = [
@@ -79,15 +84,30 @@ const columns = [
 ]
 
 onMounted(async () => {
+  loading.value = true
+  error.value = ''
   try {
     const res = await getSubscriptions()
     recentSubs.value = res.data.slice(0, 10)
     stats.value.subscriptions = res.data.length
     stats.value.nodes = res.data.reduce((sum: number, s: Subscription) => sum + s.node_count, 0)
-    // Count unique regions from nodes
-    const regions = new Set(res.data.map((s: Subscription) => s.name))
-    stats.value.regions = regions.size
-  } catch {}
+
+    // Count unique regions from actual nodes
+    const regionSet = new Set<string>()
+    for (const sub of res.data.slice(0, 5)) { // sample first 5 subs
+      try {
+        const nodesRes = await getNodes(sub.id)
+        nodesRes.data.forEach((n: any) => { if (n.region) regionSet.add(n.region) })
+      } catch { /* skip */ }
+    }
+    stats.value.regions = regionSet.size || res.data.length
+    stats.value.healthy = true
+  } catch (e: any) {
+    error.value = e.response?.data?.message || '加载失败，请检查服务状态'
+    stats.value.healthy = false
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 

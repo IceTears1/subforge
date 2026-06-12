@@ -1,0 +1,5 @@
+**/tmp/
+**/.git
+**/.gitignore
+**/README.md
+**/*.md

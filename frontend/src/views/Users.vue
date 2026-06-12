@@ -35,6 +35,7 @@
 <script setup lang="ts">
 import { ref, onMounted, h } from 'vue'
 import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NTag, NPopconfirm } from 'naive-ui'
+
 import { PersonAddOutline, TrashOutline } from '@vicons/ionicons5'
 import { getUsers, createUser, deleteUser, updateUserStatus } from '../api/user'
 import type { User } from '../api/user'
@@ -85,7 +86,10 @@ const columns = [
             size: 'small', quaternary: true, type: row.status === 1 ? 'warning' : 'success',
             onClick: () => toggleStatus(row),
           }, { default: () => row.status === 1 ? '禁用' : '启用' }),
-          h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => handleDelete(row) }, { icon: () => h(NIcon, { component: TrashOutline }) }),
+          h(NPopconfirm, { onPositiveClick: () => handleDelete(row) }, {
+            trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, { icon: () => h(NIcon, { component: TrashOutline }) }),
+            default: () => '确认删除该用户？',
+          }),
         ],
       })
     },

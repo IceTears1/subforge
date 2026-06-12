@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"fmt"
+	"sort"
 	"subforge/internal/core"
 )
 
@@ -40,5 +41,6 @@ func ListFormats() []string {
 	for k := range registry {
 		formats = append(formats, k)
 	}
+	sort.Strings(formats)
 	return formats
 }

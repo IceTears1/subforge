@@ -1,16 +1,19 @@
 package service
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"time"
 
 	"subforge/internal/core"
 	"subforge/internal/model"
 	"subforge/internal/parser"
+	"subforge/internal/pkg/httputil"
+	"subforge/internal/renderer"
 	"subforge/internal/smart"
 
 	"gorm.io/datatypes"
@@ -56,6 +59,7 @@ func (s *SubscriptionService) Create(userID uint, req CreateSubRequest) (*model.
 	}
 	sub := &model.Subscription{
 		UserID:      userID,
+		Token:       generateToken(),
 		Name:        req.Name,
 		URL:         req.URL,
 		AutoRefresh: req.AutoRefresh,
@@ -95,9 +99,8 @@ func (s *SubscriptionService) Refresh(subID, userID uint) error {
 }
 
 func (s *SubscriptionService) refreshSub(sub *model.Subscription) error {
-	// Fetch content
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(sub.URL)
+	// Fetch content (SSRF-safe)
+	resp, err := httputil.SafeGet(sub.URL, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
@@ -206,4 +209,55 @@ func (s *SubscriptionService) MergedSub(userID uint) ([]core.ProxyNode, error) {
 		all = append(all, nodes...)
 	}
 	return smart.Deduplicate(all), nil
+}
+
+// GetByToken returns a subscription by its public token.
+func (s *SubscriptionService) GetByToken(token string) (*model.Subscription, error) {
+	var sub model.Subscription
+	err := s.db.Where("token = ? AND status = 1", token).First(&sub).Error
+	if err != nil {
+		return nil, err
+	}
+	s.db.Where("subscription_id = ?", sub.ID).Order("region ASC, id ASC").Find(&sub.Nodes)
+	return &sub, nil
+}
+
+// GetNodesByToken returns rendered subscription content by token.
+func (s *SubscriptionService) GetNodesByToken(token, format string) (string, error) {
+	sub, err := s.GetByToken(token)
+	if err != nil {
+		return "", fmt.Errorf("subscription not found")
+	}
+	proxies, err := s.GetNodesAsProxy(sub.ID, sub.UserID)
+	if err != nil {
+		return "", err
+	}
+	r, err := renderer.Get(format)
+	if err != nil {
+		return "", err
+	}
+	return r.Render(proxies)
+}
+
+// MergedSubByToken returns all subscriptions merged by user token.
+func (s *SubscriptionService) MergedByToken(token, format string) (string, error) {
+	var sub model.Subscription
+	if err := s.db.Where("token = ?", token).First(&sub).Error; err != nil {
+		return "", fmt.Errorf("subscription not found")
+	}
+	proxies, err := s.MergedSub(sub.UserID)
+	if err != nil {
+		return "", err
+	}
+	r, err := renderer.Get(format)
+	if err != nil {
+		return "", err
+	}
+	return r.Render(proxies)
+}
+
+func generateToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

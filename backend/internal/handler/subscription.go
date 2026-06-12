@@ -98,3 +98,18 @@ func (h *SubscriptionHandler) GetNodes(c *gin.Context) {
 	}
 	response.OK(c, nodes)
 }
+
+// GetToken returns the subscription's public access token.
+func (h *SubscriptionHandler) GetToken(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	userID := getUserID(c)
+	sub, err := h.svc.Get(uint(id), userID)
+	if err != nil {
+		response.NotFound(c)
+		return
+	}
+	response.OK(c, gin.H{
+		"token": sub.Token,
+		"url":   "/sub/" + sub.Token + "?target=clash",
+	})
+}
