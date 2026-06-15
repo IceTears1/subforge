@@ -8,12 +8,13 @@ ENV GOOS=linux
 
 WORKDIR /app
 
-# Cache dependencies - copy go.mod/go.sum first
-COPY go.mod go.sum* ./
-RUN go mod download 2>/dev/null || true
-
-# Copy source and build
+# Copy source files
 COPY . .
+
+# Generate go.sum and download dependencies
+RUN go mod tidy && go mod download
+
+# Build
 RUN go build -ldflags="-s -w" -o /subforge ./cmd/server
 
 FROM alpine:3.19
