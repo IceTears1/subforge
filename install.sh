@@ -7,12 +7,12 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 # Config
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-DEFAULT_PORT="8080"
 
 echo -e "${CYAN}${BOLD}"
 cat << 'EOF'
@@ -24,7 +24,7 @@ cat << 'EOF'
 EOF
 echo -e "${NC}"
 echo -e "  ${BOLD}VPN Subscription Universal Converter${NC}"
-echo -e "  One-Click Installer"
+echo -e "  ${DIM}One-Click Interactive Installer${NC}"
 echo ""
 
 # ─────────────────────────────────────
@@ -37,18 +37,126 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ─────────────────────────────────────
-# Input port
+# Helper functions
 # ─────────────────────────────────────
-read -p "$(echo -e ${CYAN}Service Port [${DEFAULT_PORT}]: ${NC})" SERVICE_PORT
-SERVICE_PORT=${SERVICE_PORT:-$DEFAULT_PORT}
+gen_pass() {
+    openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c "$1"
+}
+
+confirm() {
+    local prompt="$1"
+    local default="${2:-y}"
+    if [ "$default" = "y" ]; then
+        read -p "$(echo -e ${CYAN}${prompt} [Y/n]: ${NC})" choice
+        choice=${choice:-y}
+    else
+        read -p "$(echo -e ${CYAN}${prompt} [y/N]: ${NC})" choice
+        choice=${choice:-n}
+    fi
+    [[ "$choice" =~ ^[Yy]$ ]]
+}
+
+# ─────────────────────────────────────
+# Interactive Configuration
+# ─────────────────────────────────────
+echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+echo -e "${YELLOW}${BOLD}         配置向导 Configuration${NC}"
+echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+echo ""
+
+# Port
+echo -e "${CYAN}[1/5] 服务端口${NC}"
+echo -e "  ${DIM}SubForge Web 服务监听的端口${NC}"
+read -p "  端口 [8080]: " INPUT_PORT
+PORT=${INPUT_PORT:-8080}
+echo -e "  ${GREEN}✓ 端口: ${PORT}${NC}"
+echo ""
+
+# Admin password
+echo -e "${CYAN}[2/5] 管理员密码${NC}"
+echo -e "  ${DIM}admin 账户的登录密码${NC}"
+read -p "  密码 (留空自动生成): " INPUT_ADMIN
+if [ -z "$INPUT_ADMIN" ]; then
+    ADMIN_PASSWORD=$(gen_pass 16)
+    echo -e "  ${GREEN}✓ 已生成随机密码${NC}"
+else
+    ADMIN_PASSWORD="$INPUT_ADMIN"
+    echo -e "  ${GREEN}✓ 已设置自定义密码${NC}"
+fi
+echo ""
+
+# Database password
+echo -e "${CYAN}[3/5] 数据库密码${NC}"
+echo -e "  ${DIM}PostgreSQL 数据库密码${NC}"
+if confirm "  自动生成? (推荐)" "y"; then
+    DB_PASSWORD=$(gen_pass 24)
+    echo -e "  ${GREEN}✓ 已生成随机密码${NC}"
+else
+    read -p "  密码: " DB_PASSWORD
+    echo -e "  ${GREEN}✓ 已设置自定义密码${NC}"
+fi
+echo ""
+
+# JWT Secret
+echo -e "${CYAN}[4/5] JWT 密钥${NC}"
+echo -e "  ${DIM}用于生成登录 Token，建议 32 位以上${NC}"
+if confirm "  自动生成? (推荐)" "y"; then
+    JWT_SECRET=$(gen_pass 32)
+    echo -e "  ${GREEN}✓ 已生成随机密钥${NC}"
+else
+    read -p "  密钥: " JWT_SECRET
+    echo -e "  ${GREEN}✓ 已设置自定义密钥${NC}"
+fi
+echo ""
+
+# Domain (optional)
+echo -e "${CYAN}[5/5] 域名 (可选)${NC}"
+echo -e "  ${DIM}用于 HTTPS 配置，留空跳过${NC}"
+read -p "  域名 (留空跳过): " DOMAIN
+if [ -n "$DOMAIN" ]; then
+    echo -e "  ${GREEN}✓ 域名: ${DOMAIN}${NC}"
+else
+    echo -e "  ${DIM}  跳过 HTTPS 配置${NC}"
+fi
+echo ""
+
+# ─────────────────────────────────────
+# Confirm
+# ─────────────────────────────────────
+echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+echo -e "${YELLOW}${BOLD}         确认配置 Summary${NC}"
+echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${CYAN}端口:${NC}     ${PORT}"
+echo -e "  ${CYAN}用户名:${NC}   admin"
+echo -e "  ${CYAN}密码:${NC}     ${ADMIN_PASSWORD}"
+echo -e "  ${CYAN}数据库:${NC}   subforge (${DB_PASSWORD:0:8}...)"
+echo -e "  ${CYAN}JWT:${NC}      ${JWT_SECRET:0:8}..."
+if [ -n "$DOMAIN" ]; then
+    echo -e "  ${CYAN}域名:${NC}     ${DOMAIN}"
+fi
+echo ""
+echo -e "  ${DIM}安装目录: ${INSTALL_DIR}${NC}"
+echo ""
+
+if ! confirm "  确认安装?" "y"; then
+    echo -e "${RED}安装已取消${NC}"
+    exit 0
+fi
 
 echo ""
-echo -e "${YELLOW}[1/5] Installing Docker...${NC}"
+echo -e "${GREEN}${BOLD}开始安装...${NC}"
+echo ""
+
+# ─────────────────────────────────────
+# Step 1: Install Docker
+# ─────────────────────────────────────
+echo -e "${YELLOW}[1/5] 检查 Docker...${NC}"
 
 if command -v docker &>/dev/null; then
-    echo -e "  ${GREEN}Docker already installed: $(docker --version)${NC}"
+    echo -e "  ${GREEN}✓ Docker 已安装: $(docker --version | head -1)${NC}"
 else
-    # Detect OS
+    echo -e "  ${YELLOW}正在安装 Docker...${NC}"
     if [ -f /etc/debian_version ]; then
         apt-get update -qq
         apt-get install -y -qq ca-certificates curl gnupg
@@ -65,97 +173,93 @@ else
     else
         curl -fsSL https://get.docker.com | bash
     fi
-
     systemctl enable docker
     systemctl start docker
-    echo -e "  ${GREEN}Docker installed${NC}"
+    echo -e "  ${GREEN}✓ Docker 安装完成${NC}"
 fi
 
-# Check docker compose
-echo -e "${YELLOW}[2/5] Checking Docker Compose...${NC}"
+# ─────────────────────────────────────
+# Step 2: Check Docker Compose
+# ─────────────────────────────────────
+echo -e "${YELLOW}[2/5] 检查 Docker Compose...${NC}"
+
 if docker compose version &>/dev/null; then
-    echo -e "  ${GREEN}Docker Compose OK${NC}"
+    echo -e "  ${GREEN}✓ Docker Compose 已安装${NC}"
 else
-    echo -e "  ${YELLOW}Installing Docker Compose plugin...${NC}"
+    echo -e "  ${YELLOW}正在安装 Docker Compose...${NC}"
     mkdir -p /usr/local/lib/docker/cli-plugins
     ARCH=$(uname -m)
-    [ "$ARCH" = "x86_64" ] && ARCH="x86_64"
-    [ "$ARCH" = "aarch64" ] && ARCH="aarch64"
     curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}" \
         -o /usr/local/lib/docker/cli-plugins/docker-compose
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-    echo -e "  ${GREEN}Docker Compose installed${NC}"
+    echo -e "  ${GREEN}✓ Docker Compose 安装完成${NC}"
 fi
 
 # ─────────────────────────────────────
-# Clone repo
+# Step 3: Download SubForge
 # ─────────────────────────────────────
-echo -e "${YELLOW}[3/5] Downloading SubForge...${NC}"
+echo -e "${YELLOW}[3/5] 下载 SubForge...${NC}"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd "$INSTALL_DIR"
     git pull origin main 2>/dev/null || true
-    echo -e "  ${GREEN}Updated to latest version${NC}"
+    echo -e "  ${GREEN}✓ 已更新到最新版本${NC}"
 else
     rm -rf "$INSTALL_DIR"
-    # Try SSH first, fallback to HTTPS
-    git clone "$REPO" "$INSTALL_DIR" 2>/dev/null || \
-    git clone "https://github.com/IceTears1/subforge.git" "$INSTALL_DIR"
+    git clone "$REPO" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
-    echo -e "  ${GREEN}Downloaded to ${INSTALL_DIR}${NC}"
+    echo -e "  ${GREEN}✓ 下载完成${NC}"
 fi
 
 # ─────────────────────────────────────
-# Generate config
+# Step 4: Generate Config
 # ─────────────────────────────────────
-echo -e "${YELLOW}[4/5] Configuring...${NC}"
+echo -e "${YELLOW}[4/5] 生成配置文件...${NC}"
 
-gen_pass() {
-    openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c "$1"
-}
+cat > .env <<EOF
+# SubForge Configuration
+# Generated at $(date)
 
-if [ ! -f .env ]; then
-    DB_PASSWORD=$(gen_pass 24)
-    JWT_SECRET=$(gen_pass 32)
-    ADMIN_PASSWORD=$(gen_pass 16)
+# Server port
+PORT=${PORT}
 
-    # Write .env with actual values (not variable references)
-    echo "PORT=${SERVICE_PORT}" > .env
-    echo "DB_NAME=subforge" >> .env
-    echo "DB_USER=subforge" >> .env
-    echo "DB_PASSWORD=${DB_PASSWORD}" >> .env
-    echo "JWT_SECRET=${JWT_SECRET}" >> .env
-    echo "JWT_EXPIRY=24h" >> .env
-    echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env
-    echo -e "  ${GREEN}Configuration generated${NC}"
-else
-    sed -i "s/^PORT=.*/PORT=${SERVICE_PORT}/" .env
-    ADMIN_PASSWORD=$(grep ADMIN_PASSWORD .env | cut -d'=' -f2)
-    echo -e "  ${GREEN}Configuration updated (port: ${SERVICE_PORT})${NC}"
-fi
+# Database
+DB_NAME=subforge
+DB_USER=subforge
+DB_PASSWORD=${DB_PASSWORD}
+DB_SSL_MODE=disable
 
-# ─────────────────────────────────────
-# Firewall
-# ─────────────────────────────────────
-if command -v ufw &>/dev/null; then
-    ufw allow "$SERVICE_PORT"/tcp 2>/dev/null || true
-    echo -e "  ${GREEN}Firewall: port ${SERVICE_PORT} opened (ufw)${NC}"
-elif command -v firewall-cmd &>/dev/null; then
-    firewall-cmd --permanent --add-port="$SERVICE_PORT"/tcp 2>/dev/null || true
-    firewall-cmd --reload 2>/dev/null || true
-    echo -e "  ${GREEN}Firewall: port ${SERVICE_PORT} opened (firewalld)${NC}"
-fi
+# JWT
+JWT_SECRET=${JWT_SECRET}
+JWT_EXPIRY=24h
+
+# Admin
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+
+# CORS (comma-separated origins, empty = same-origin only)
+CORS_ORIGINS=
+
+# Admin IP whitelist (comma-separated IPs, empty = no restriction)
+ADMIN_IP_WHITELIST=
+
+# Gin mode
+GIN_MODE=release
+EOF
+
+echo -e "  ${GREEN}✓ 配置文件已生成${NC}"
 
 # ─────────────────────────────────────
-# Start services
+# Step 5: Start Services
 # ─────────────────────────────────────
-echo -e "${YELLOW}[5/5] Starting SubForge...${NC}"
+echo -e "${YELLOW}[5/5] 启动服务...${NC}"
 
 docker compose down 2>/dev/null || true
 docker compose up -d --build
 
-# Wait for healthy
-echo -e "  ${YELLOW}Waiting for services to be ready...${NC}"
+echo -e "  ${YELLOW}等待服务启动...${NC}"
+sleep 10
+
+# Check status
 RETRIES=0
 MAX_RETRIES=30
 while [ $RETRIES -lt $MAX_RETRIES ]; do
@@ -172,23 +276,40 @@ PUBLIC_IP=$(curl -s --connect-timeout 3 ifconfig.me 2>/dev/null || \
             hostname -I | awk '{print $1}')
 
 # ─────────────────────────────────────
+# Firewall
+# ─────────────────────────────────────
+if command -v ufw &>/dev/null; then
+    ufw allow "$PORT"/tcp 2>/dev/null || true
+    echo -e "  ${GREEN}✓ 防火墙: 端口 ${PORT} 已开放${NC}"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --permanent --add-port="$PORT"/tcp 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    echo -e "  ${GREEN}✓ 防火墙: 端口 ${PORT} 已开放${NC}"
+fi
+
+# ─────────────────────────────────────
 # Done
 # ─────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}============================================${NC}"
-echo -e "${GREEN}${BOLD}  ✅ SubForge installed successfully!${NC}"
-echo -e "${GREEN}${BOLD}============================================${NC}"
+echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}  ✅ SubForge 安装成功!${NC}"
+echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
 echo ""
-echo -e "  ${BOLD}URL:${NC}      ${CYAN}http://${PUBLIC_IP}:${SERVICE_PORT}${NC}"
-echo -e "  ${BOLD}Username:${NC} ${CYAN}admin${NC}"
-echo -e "  ${BOLD}Password:${NC} ${CYAN}${ADMIN_PASSWORD}${NC}"
+echo -e "  ${BOLD}访问地址:${NC}  ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
+echo -e "  ${BOLD}用户名:${NC}    ${CYAN}admin${NC}"
+echo -e "  ${BOLD}密码:${NC}      ${CYAN}${ADMIN_PASSWORD}${NC}"
 echo ""
-echo -e "  ${YELLOW}Commands:${NC}"
-echo -e "    View logs:   ${CYAN}cd ${INSTALL_DIR} && docker compose logs -f${NC}"
-echo -e "    Restart:     ${CYAN}cd ${INSTALL_DIR} && docker compose restart${NC}"
-echo -e "    Stop:        ${CYAN}cd ${INSTALL_DIR} && docker compose down${NC}"
-echo -e "    Update:      ${CYAN}cd ${INSTALL_DIR} && git pull && docker compose up -d --build${NC}"
-echo -e "    Uninstall:   ${CYAN}cd ${INSTALL_DIR} && docker compose down -v && rm -rf ${INSTALL_DIR}${NC}"
+if [ -n "$DOMAIN" ]; then
+    echo -e "  ${YELLOW}HTTPS 配置:${NC}"
+    echo -e "    运行 ${CYAN}cd ${INSTALL_DIR} && sudo bash setup-ssl.sh${NC}"
+    echo ""
+fi
+echo -e "  ${YELLOW}常用命令:${NC}"
+echo -e "    查看日志:   ${CYAN}cd ${INSTALL_DIR} && docker compose logs -f${NC}"
+echo -e "    重启服务:   ${CYAN}cd ${INSTALL_DIR} && docker compose restart${NC}"
+echo -e "    停止服务:   ${CYAN}cd ${INSTALL_DIR} && docker compose down${NC}"
+echo -e "    更新版本:   ${CYAN}cd ${INSTALL_DIR} && git pull && docker compose up -d --build${NC}"
+echo -e "    卸载:       ${CYAN}cd ${INSTALL_DIR} && docker compose down -v && rm -rf ${INSTALL_DIR}${NC}"
 echo ""
-echo -e "  ${YELLOW}Config file: ${INSTALL_DIR}/.env${NC}"
+echo -e "  ${DIM}配置文件: ${INSTALL_DIR}/.env${NC}"
 echo ""
