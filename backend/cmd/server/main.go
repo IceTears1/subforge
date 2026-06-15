@@ -60,9 +60,10 @@ func main() {
 	batchH := handler.NewBatchHandler(subSvc)
 	healthH := handler.NewHealthHandler(healthSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
+	metricsH := handler.NewMetricsHandler(db)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{

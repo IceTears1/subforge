@@ -6,16 +6,17 @@ import (
 )
 
 type Config struct {
-	Port          string
-	DBHost        string
-	DBPort        string
-	DBName        string
-	DBUser        string
-	DBPassword    string
-	JWTSecret     string
-	JWTExpiry     string
-	AdminPassword string
-	GinMode       string
+	Port              string
+	DBHost            string
+	DBPort            string
+	DBName            string
+	DBUser            string
+	DBPassword        string
+	JWTSecret         string
+	JWTExpiry         string
+	AdminPassword     string
+	GinMode           string
+	AdminIPWhitelist  string // comma-separated IPs, empty = no restriction
 }
 
 func Load() *Config {
@@ -28,8 +29,9 @@ func Load() *Config {
 		DBPassword:    getEnv("DB_PASSWORD", "subforge123"),
 		JWTSecret:     getEnv("JWT_SECRET", "change-me-in-production"),
 		JWTExpiry:     getEnv("JWT_EXPIRY", "24h"),
-		AdminPassword: getEnv("ADMIN_PASSWORD", "admin123"),
-		GinMode:       getEnv("GIN_MODE", "debug"),
+		AdminPassword:    getEnv("ADMIN_PASSWORD", "admin123"),
+		GinMode:          getEnv("GIN_MODE", "debug"),
+		AdminIPWhitelist: getEnv("ADMIN_IP_WHITELIST", ""),
 	}
 	cfg.validate()
 	return cfg

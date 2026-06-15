@@ -1,6 +1,6 @@
 <template>
   <div>
-    <n-grid :cols="4" :x-gap="16" :y-gap="16">
+    <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
       <n-gi>
         <n-card :bordered="false" class="stat-card">
           <n-statistic label="订阅数量">
@@ -43,6 +43,47 @@
       </n-gi>
     </n-grid>
 
+    <n-grid :cols="isMobile ? 1 : 2" :x-gap="24" style="margin-top: 24px">
+      <n-gi>
+        <n-card title="节点区域分布" :bordered="false">
+          <div class="region-bars">
+            <div v-for="item in regionStats" :key="item.region" class="region-bar">
+              <div class="region-label">
+                <span>{{ item.emoji }} {{ item.region }}</span>
+                <span class="region-count">{{ item.count }}</span>
+              </div>
+              <n-progress
+                :percentage="item.percent"
+                :show-indicator="false"
+                :color="item.color"
+                :rail-color="isDark ? '#2a2a4a' : '#f0f0f0'"
+                style="height: 8px"
+              />
+            </div>
+          </div>
+        </n-card>
+      </n-gi>
+      <n-gi>
+        <n-card title="协议分布" :bordered="false">
+          <div class="region-bars">
+            <div v-for="item in protocolStats" :key="item.type" class="region-bar">
+              <div class="region-label">
+                <span>{{ item.type.toUpperCase() }}</span>
+                <span class="region-count">{{ item.count }}</span>
+              </div>
+              <n-progress
+                :percentage="item.percent"
+                :show-indicator="false"
+                :color="item.color"
+                :rail-color="isDark ? '#2a2a4a' : '#f0f0f0'"
+                style="height: 8px"
+              />
+            </div>
+          </div>
+        </n-card>
+      </n-gi>
+    </n-grid>
+
     <n-card title="最近订阅" :bordered="false" style="margin-top: 24px">
       <n-alert v-if="error" type="error" style="margin-bottom: 16px">
         {{ error }}
@@ -53,30 +94,73 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
-import { NGrid, NGi, NCard, NStatistic, NIcon, NDataTable, NTag, NAlert } from 'naive-ui'
+import { ref, computed, onMounted, h } from 'vue'
+import { NGrid, NGi, NCard, NStatistic, NIcon, NDataTable, NTag, NAlert, NProgress } from 'naive-ui'
 import { CloudOutline, ServerOutline, GlobeOutline, PulseOutline } from '@vicons/ionicons5'
 import { getSubscriptions, getNodes } from '../api/subscription'
-import type { Subscription } from '../api/subscription'
+import { useThemeStore } from '../stores/theme'
+import type { Subscription, Node } from '../api/subscription'
 
+const themeStore = useThemeStore()
+const isDark = computed(() => themeStore.isDark)
+const isMobile = ref(window.innerWidth <= 768)
 const loading = ref(false)
 const error = ref('')
 const stats = ref({ subscriptions: 0, nodes: 0, regions: 0, healthy: true })
 const recentSubs = ref<Subscription[]>([])
+const allNodes = ref<Node[]>([])
+
+const regionColors: Record<string, string> = {
+  HK: '#ef4444', JP: '#f59e0b', SG: '#10b981', US: '#6366f1',
+  TW: '#ec4899', KR: '#8b5cf6', UK: '#06b6d4', DE: '#84cc16', OTHER: '#9ca3af',
+}
+
+const protocolColors: Record<string, string> = {
+  vmess: '#6366f1', vless: '#10b981', trojan: '#f59e0b',
+  ss: '#ef4444', ssr: '#ec4899', hysteria2: '#8b5cf6', tuic: '#06b6d4',
+}
+
+const regionStats = computed(() => {
+  const counts: Record<string, number> = {}
+  allNodes.value.forEach(n => { counts[n.region || 'OTHER'] = (counts[n.region || 'OTHER'] || 0) + 1 })
+  const total = allNodes.value.length || 1
+  return Object.entries(counts)
+    .map(([region, count]) => ({
+      region,
+      count,
+      percent: Math.round((count / total) * 100),
+      emoji: { HK: '🇭🇰', JP: '🇯🇵', SG: '🇸🇬', US: '🇺🇸', TW: '🇨🇳', KR: '🇰🇷', UK: '🇬🇧', DE: '🇩🇪' }[region] || '🌐',
+      color: regionColors[region] || regionColors.OTHER,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8)
+})
+
+const protocolStats = computed(() => {
+  const counts: Record<string, number> = {}
+  allNodes.value.forEach(n => { counts[n.node_type || 'other'] = (counts[n.node_type || 'other'] || 0) + 1 })
+  const total = allNodes.value.length || 1
+  return Object.entries(counts)
+    .map(([type, count]) => ({
+      type,
+      count,
+      percent: Math.round((count / total) * 100),
+      color: protocolColors[type] || '#9ca3af',
+    }))
+    .sort((a, b) => b.count - a.count)
+})
 
 const columns = [
   { title: '名称', key: 'name' },
   { title: '节点数', key: 'node_count' },
   {
-    title: '状态',
-    key: 'status',
+    title: '状态', key: 'status',
     render(row: Subscription) {
       return h(NTag, { type: row.status === 1 ? 'success' : 'error', size: 'small', bordered: false }, { default: () => row.status === 1 ? '正常' : '禁用' })
     },
   },
   {
-    title: '最后更新',
-    key: 'last_fetch',
+    title: '最后更新', key: 'last_fetch',
     render(row: Subscription) {
       return row.last_fetch ? new Date(row.last_fetch).toLocaleString() : '未更新'
     },
@@ -93,12 +177,13 @@ onMounted(async () => {
     stats.value.subscriptions = res.data.total || items.length
     stats.value.nodes = items.reduce((sum: number, s: Subscription) => sum + s.node_count, 0)
 
-    // Count unique regions from actual nodes
     const regionSet = new Set<string>()
-    for (const sub of items.slice(0, 5)) {
+    for (const sub of items.slice(0, 10)) {
       try {
         const nodesRes = await getNodes(sub.id)
-        nodesRes.data.forEach((n: any) => { if (n.region) regionSet.add(n.region) })
+        const nodes = nodesRes.data || []
+        allNodes.value.push(...nodes)
+        nodes.forEach((n: Node) => { if (n.region) regionSet.add(n.region) })
       } catch { /* skip */ }
     }
     stats.value.regions = regionSet.size || items.length
@@ -113,7 +198,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.stat-card {
-  text-align: center;
-}
+.stat-card { text-align: center; }
+.region-bars { display: flex; flex-direction: column; gap: 12px; }
+.region-label { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
+.region-count { font-weight: 600; color: #6366f1; }
 </style>

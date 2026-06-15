@@ -23,6 +23,7 @@ func Setup(
 	batchH *handler.BatchHandler,
 	healthH *handler.HealthHandler,
 	auditH *handler.AuditHandler,
+	metricsH *handler.MetricsHandler,
 	authSvc *service.AuthService,
 	cfg *config.Config,
 ) *gin.Engine {
@@ -53,6 +54,9 @@ func Setup(
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	// Metrics (public)
+	r.GET("/api/metrics", metricsH.GetMetrics)
+
 	// Public subscription endpoint (no auth needed)
 	r.GET("/sub/:token", publicH.GetSub)
 	r.GET("/sub/:token/merged", publicH.GetMergedSub)
@@ -69,10 +73,12 @@ func Setup(
 	// Auth middleware
 	authMW := handler.AuthMiddleware(authSvc)
 	adminRequired := handler.AdminRequired()
+	ipWhitelist := handler.IPWhitelistMiddleware(cfg)
 
 	// Protected routes
 	api := r.Group("/api")
 	api.Use(authMW)
+	api.Use(ipWhitelist)
 	{
 		// Profile (any user)
 		api.GET("/me", profileH.GetMe)
