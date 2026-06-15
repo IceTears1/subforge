@@ -43,3 +43,11 @@ dev-backend:
 # Dev mode - frontend
 dev-frontend:
 	cd frontend && npm run dev
+
+# Health check
+health:
+	chmod +x scripts/health-check.sh && ./scripts/health-check.sh
+
+# View metrics
+metrics:
+	curl -s http://localhost:8080/api/metrics | jq .

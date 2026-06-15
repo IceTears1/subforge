@@ -14,6 +14,14 @@
               </template>
               确认删除 {{ selectedIds.length }} 个订阅？
             </n-popconfirm>
+            <n-button @click="showImport = true">
+              <template #icon><n-icon :component="CloudUploadOutline" /></template>
+              导入
+            </n-button>
+            <n-button @click="handleExport">
+              <template #icon><n-icon :component="CloudDownloadOutline" /></template>
+              导出
+            </n-button>
             <n-button type="primary" @click="openAdd">
               <template #icon><n-icon :component="AddOutline" /></template>
               添加订阅
@@ -74,17 +82,20 @@
     </n-modal>
 
     <ShareModal :show="showShare" :token="shareToken" @update:show="showShare = $event" />
+    <ImportModal :show="showImport" @update:show="showImport = $event" @imported="load" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NInputNumber, NTag, NSelect, NText, NPopconfirm } from 'naive-ui'
-import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline } from '@vicons/ionicons5'
+import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline, CloudUploadOutline, CloudDownloadOutline } from '@vicons/ionicons5'
 import ShareModal from '../components/ShareModal.vue'
+import ImportModal from '../components/ImportModal.vue'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
+  exportSubscriptions,
 } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
@@ -105,6 +116,7 @@ const tokenFormat = ref('clash')
 const selectedIds = ref<number[]>([])
 const showShare = ref(false)
 const shareToken = ref('')
+const showImport = ref(false)
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -300,6 +312,20 @@ async function openShare(sub: Subscription) {
     shareToken.value = res.data.token
     showShare.value = true
   } catch { message.error('获取订阅链接失败') }
+}
+
+async function handleExport() {
+  try {
+    const res = await exportSubscriptions()
+    const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `subforge-export-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    message.success('导出成功')
+  } catch { message.error('导出失败') }
 }
 
 onMounted(load)
