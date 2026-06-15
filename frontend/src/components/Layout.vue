@@ -72,7 +72,7 @@ import {
   NLayout, NLayoutSider, NLayoutHeader, NLayoutContent, NMenu, NButton, NIcon,
   NBreadcrumb, NBreadcrumbItem, NSpace, NTag, NDrawer, NDrawerContent,
 } from 'naive-ui'
-import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline, KeyOutline, StatsChartOutline, ServerOutline, DownloadOutline } from '@vicons/ionicons5'
+import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline, KeyOutline, StatsChartOutline, ServerOutline, DownloadOutline, AnalyticsOutline } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import type { MenuOption } from 'naive-ui'
@@ -97,6 +97,7 @@ const menuOptions: MenuOption[] = [
   { label: '仪表盘', key: '/', icon: () => h(NIcon, { component: GridOutline }) },
   { label: '订阅管理', key: '/subscriptions', icon: () => h(NIcon, { component: CloudOutline }) },
   { label: '节点管理', key: '/nodes', icon: () => h(NIcon, { component: ServerOutline }) },
+  { label: '数据统计', key: '/statistics', icon: () => h(NIcon, { component: AnalyticsOutline }) },
   { label: '在线转换', key: '/convert', icon: () => h(NIcon, { component: SwapHorizontalOutline }) },
   { label: 'API Keys', key: '/apikeys', icon: () => h(NIcon, { component: KeyOutline }) },
   ...(auth.isAdmin ? [
@@ -110,7 +111,7 @@ const menuOptions: MenuOption[] = [
 const activeKey = computed(() => route.path)
 const currentPageTitle = computed(() => {
   const map: Record<string, string> = {
-    '/': '仪表盘', '/subscriptions': '订阅管理', '/nodes': '节点管理', '/convert': '在线转换',
+    '/': '仪表盘', '/subscriptions': '订阅管理', '/nodes': '节点管理', '/statistics': '数据统计', '/convert': '在线转换',
     '/users': '子账户管理', '/apikeys': 'API Keys', '/monitor': '系统监控', '/update': '版本更新', '/settings': '系统设置',
   }
   return map[route.path] || ''

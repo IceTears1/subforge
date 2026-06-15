@@ -27,6 +27,7 @@ func Setup(
 	metricsH *handler.MetricsHandler,
 	apiKeyH *handler.APIKeyHandler,
 	updateH *handler.UpdateHandler,
+	schedulerH *handler.SchedulerHandler,
 	apiKeySvc *service.APIKeyService,
 	authSvc *service.AuthService,
 	cfg *config.Config,
@@ -171,6 +172,10 @@ func Setup(
 			update.POST("/tag", updateH.UpdateToTag)
 			update.POST("/rollback", updateH.Rollback)
 		}
+
+		// Scheduler (admin only)
+		api.GET("/scheduler/stats", adminRequired, schedulerH.GetStats)
+		api.POST("/scheduler/refresh", adminRequired, schedulerH.ForceRefresh)
 
 		// Convert
 		api.POST("/convert", convertH.Convert)

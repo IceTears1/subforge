@@ -15,6 +15,7 @@ const routes = [
       { path: '', name: 'Dashboard', component: () => import('../views/Dashboard.vue') },
       { path: 'subscriptions', name: 'Subscriptions', component: () => import('../views/Subscriptions.vue') },
       { path: 'nodes', name: 'Nodes', component: () => import('../views/Nodes.vue') },
+      { path: 'statistics', name: 'Statistics', component: () => import('../views/Statistics.vue') },
       { path: 'convert', name: 'Convert', component: () => import('../views/Convert.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'apikeys', name: 'APIKeys', component: () => import('../views/APIKeys.vue') },
