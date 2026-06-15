@@ -1,27 +1,30 @@
 FROM golang:1.25-alpine AS builder
 
-# Go proxy: try Chinese mirror first, fall back to default
+# Go proxy for faster downloads in China
 ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct
 ENV GO111MODULE=on
+ENV CGO_ENABLED=0
+ENV GOOS=linux
 
 WORKDIR /app
-COPY go.mod ./
-RUN go mod download || true
+
+# Cache dependencies - copy go.mod/go.sum first
+COPY go.mod go.sum* ./
+RUN go mod download 2>/dev/null || true
+
+# Copy source and build
 COPY . .
-RUN go mod tidy 2>/dev/null || true
-RUN CGO_ENABLED=0 GOOS=linux go build -o /subforge ./cmd/server
+RUN go build -ldflags="-s -w" -o /subforge ./cmd/server
 
 FROM alpine:3.19
 
-# Install dependencies (try Aliyun mirror, fall back to default)
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories 2>/dev/null; \
-    apk --no-cache add ca-certificates tzdata || \
-    (sed -i 's/mirrors.aliyun.com/dl-cdn.alpinelinux.org/g' /etc/apk/repositories 2>/dev/null; \
-     apk --no-cache add ca-certificates tzdata)
+# Install dependencies
+RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
 COPY --from=builder /subforge .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
+
 EXPOSE 8080
 ENTRYPOINT ["./docker-entrypoint.sh"]
