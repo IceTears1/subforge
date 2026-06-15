@@ -17,6 +17,10 @@
               </template>
               确认删除 {{ selectedIds.length }} 个订阅？
             </n-popconfirm>
+            <n-button @click="showTemplate = true">
+              <template #icon><n-icon :component="DocumentTextOutline" /></template>
+              模板
+            </n-button>
             <n-button @click="showImport = true">
               <template #icon><n-icon :component="CloudUploadOutline" /></template>
               导入
@@ -93,16 +97,22 @@
       @refresh="(sub: Subscription) => handleRefresh(sub)"
       @share="(sub: Subscription) => openShare(sub)"
     />
+    <TemplateModal
+      :show="showTemplate"
+      @update:show="showTemplate = $event"
+      @create="handleTemplateCreate"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NInputNumber, NTag, NSelect, NText, NPopconfirm } from 'naive-ui'
-import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline, CloudUploadOutline, CloudDownloadOutline } from '@vicons/ionicons5'
+import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline, CloudUploadOutline, CloudDownloadOutline, DocumentTextOutline } from '@vicons/ionicons5'
 import ShareModal from '../components/ShareModal.vue'
 import ImportModal from '../components/ImportModal.vue'
 import SubscriptionDetail from '../components/SubscriptionDetail.vue'
+import TemplateModal from '../components/TemplateModal.vue'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
@@ -130,6 +140,7 @@ const shareToken = ref('')
 const showImport = ref(false)
 const showDetail = ref(false)
 const detailSub = ref<Subscription | null>(null)
+const showTemplate = ref(false)
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -302,6 +313,16 @@ async function handleCheck(sub: Subscription) {
     const { total, online, offline } = res.data
     message.success(`检测完成: ${online}/${total} 在线, ${offline} 离线`)
   } catch { message.error('检测失败') }
+}
+
+async function handleTemplateCreate(data: { name: string; url: string; autoRefresh: number; tags: string[] }) {
+  try {
+    await createSubscription(data.name, data.url, data.autoRefresh, data.tags)
+    message.success('从模板创建成功')
+    await load()
+  } catch (e: any) {
+    message.error(e.response?.data?.message || '创建失败')
+  }
 }
 
 async function viewNodes(sub: Subscription) {

@@ -209,3 +209,67 @@ body {
   background: #6366f1;
   color: white;
 }
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  /* Larger touch targets */
+  .n-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Better spacing on mobile */
+  .n-card {
+    margin-bottom: 12px;
+  }
+
+  /* Full width modals on mobile */
+  .n-modal {
+    width: 95vw !important;
+    max-width: 95vw !important;
+  }
+
+  /* Better table scrolling */
+  .n-data-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Hide scrollbar on mobile */
+  .n-data-table::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Safe area padding */
+  .n-layout-content {
+    padding-bottom: calc(24px + var(--sab)) !important;
+  }
+
+  /* Better form inputs on mobile */
+  .n-input {
+    font-size: 16px !important; /* Prevent zoom on iOS */
+  }
+
+  /* Touch-friendly select */
+  .n-select {
+    min-height: 44px;
+  }
+}
+
+/* Print styles */
+@media print {
+  .n-layout-sider,
+  .n-layout-header,
+  .mobile-menu-btn {
+    display: none !important;
+  }
+
+  .n-layout-content {
+    padding: 0 !important;
+  }
+
+  .n-card {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+}

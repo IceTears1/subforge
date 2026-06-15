@@ -18,6 +18,7 @@ const routes = [
       { path: 'statistics', name: 'Statistics', component: () => import('../views/Statistics.vue') },
       { path: 'compare', name: 'Compare', component: () => import('../views/Compare.vue') },
       { path: 'performance', name: 'Performance', component: () => import('../views/Performance.vue') },
+      { path: 'groups', name: 'Groups', component: () => import('../views/Groups.vue') },
       { path: 'convert', name: 'Convert', component: () => import('../views/Convert.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'apikeys', name: 'APIKeys', component: () => import('../views/APIKeys.vue') },
