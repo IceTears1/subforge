@@ -51,3 +51,7 @@ health:
 # View metrics
 metrics:
 	curl -s http://localhost:8080/api/metrics | jq .
+
+# Deploy verification
+verify:
+	chmod +x scripts/deploy-verify.sh && ./scripts/deploy-verify.sh

@@ -86,6 +86,13 @@
 
     <ShareModal :show="showShare" :token="shareToken" @update:show="showShare = $event" />
     <ImportModal :show="showImport" @update:show="showImport = $event" @imported="load" />
+    <SubscriptionDetail
+      :show="showDetail"
+      :sub="detailSub"
+      @update:show="showDetail = $event"
+      @refresh="(sub: Subscription) => handleRefresh(sub)"
+      @share="(sub: Subscription) => openShare(sub)"
+    />
   </div>
 </template>
 
@@ -95,6 +102,7 @@ import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, N
 import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline, CloudUploadOutline, CloudDownloadOutline } from '@vicons/ionicons5'
 import ShareModal from '../components/ShareModal.vue'
 import ImportModal from '../components/ImportModal.vue'
+import SubscriptionDetail from '../components/SubscriptionDetail.vue'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
@@ -120,6 +128,8 @@ const selectedIds = ref<number[]>([])
 const showShare = ref(false)
 const shareToken = ref('')
 const showImport = ref(false)
+const showDetail = ref(false)
+const detailSub = ref<Subscription | null>(null)
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -178,6 +188,7 @@ const columns = [
     render(row: Subscription) {
       return h(NSpace, { size: 'small' }, {
         default: () => [
+          h(NButton, { size: 'small', quaternary: true, onClick: () => openDetail(row) }, { default: () => '详情' }),
           h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => viewNodes(row) }, { icon: () => h(NIcon, { component: EyeOutline }), default: () => '节点' }),
           h(NButton, { size: 'small', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { icon: () => h(NIcon, { component: CreateOutline }) }),
           h(NButton, { size: 'small', quaternary: true, type: 'success', onClick: () => viewToken(row) }, { icon: () => h(NIcon, { component: LinkOutline }) }),
@@ -221,6 +232,11 @@ function openEdit(sub: Subscription) {
   editingId.value = sub.id
   form.value = { name: sub.name, url: sub.url, auto_refresh: sub.auto_refresh }
   showForm.value = true
+}
+
+function openDetail(sub: Subscription) {
+  detailSub.value = sub
+  showDetail.value = true
 }
 
 async function handleSave() {
