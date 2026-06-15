@@ -113,6 +113,7 @@ build_backend() {
         -v "$(pwd):/app" \
         -w /app \
         -e GOPROXY=https://goproxy.cn,direct \
+        -e GOTOOLCHAIN=auto \
         golang:1.24-alpine \
         sh -c "go mod tidy && CGO_ENABLED=0 GOOS=linux GOARCH=${GOARCH} go build -ldflags='-s -w' -o /app/subforge ./cmd/server"
 
