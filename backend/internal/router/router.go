@@ -26,6 +26,7 @@ func Setup(
 	auditH *handler.AuditHandler,
 	metricsH *handler.MetricsHandler,
 	apiKeyH *handler.APIKeyHandler,
+	updateH *handler.UpdateHandler,
 	apiKeySvc *service.APIKeyService,
 	authSvc *service.AuthService,
 	cfg *config.Config,
@@ -157,6 +158,16 @@ func Setup(
 
 		// Audit logs (admin only)
 		api.GET("/audit", adminRequired, auditH.List)
+
+		// Version update (admin only)
+		update := api.Group("/update")
+		update.Use(adminRequired)
+		{
+			update.GET("/version", updateH.GetVersion)
+			update.GET("/changelog", updateH.GetChangelog)
+			update.POST("", updateH.Update)
+			update.POST("/rollback", updateH.Rollback)
+		}
 
 		// Convert
 		api.POST("/convert", convertH.Convert)

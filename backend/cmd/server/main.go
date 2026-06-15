@@ -63,9 +63,11 @@ func main() {
 	metricsH := handler.NewMetricsHandler(db)
 	apiKeySvc := service.NewAPIKeyService(db)
 	apiKeyH := handler.NewAPIKeyHandler(apiKeySvc)
+	updateSvc := service.NewUpdateService("")
+	updateH := handler.NewUpdateHandler(updateSvc, auditSvc)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, apiKeyH, apiKeySvc, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, apiKeyH, updateH, apiKeySvc, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{

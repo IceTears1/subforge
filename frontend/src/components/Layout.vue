@@ -72,7 +72,7 @@ import {
   NLayout, NLayoutSider, NLayoutHeader, NLayoutContent, NMenu, NButton, NIcon,
   NBreadcrumb, NBreadcrumbItem, NSpace, NTag, NDrawer, NDrawerContent,
 } from 'naive-ui'
-import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline, KeyOutline, StatsChartOutline, ServerOutline } from '@vicons/ionicons5'
+import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline, KeyOutline, StatsChartOutline, ServerOutline, DownloadOutline } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import type { MenuOption } from 'naive-ui'
@@ -102,6 +102,7 @@ const menuOptions: MenuOption[] = [
   ...(auth.isAdmin ? [
     { label: '子账户管理', key: '/users', icon: () => h(NIcon, { component: PeopleOutline }) },
     { label: '系统监控', key: '/monitor', icon: () => h(NIcon, { component: StatsChartOutline }) },
+    { label: '版本更新', key: '/update', icon: () => h(NIcon, { component: DownloadOutline }) },
   ] : []),
   { label: '系统设置', key: '/settings', icon: () => h(NIcon, { component: SettingsOutline }) },
 ]
@@ -110,7 +111,7 @@ const activeKey = computed(() => route.path)
 const currentPageTitle = computed(() => {
   const map: Record<string, string> = {
     '/': '仪表盘', '/subscriptions': '订阅管理', '/nodes': '节点管理', '/convert': '在线转换',
-    '/users': '子账户管理', '/apikeys': 'API Keys', '/monitor': '系统监控', '/settings': '系统设置',
+    '/users': '子账户管理', '/apikeys': 'API Keys', '/monitor': '系统监控', '/update': '版本更新', '/settings': '系统设置',
   }
   return map[route.path] || ''
 })
