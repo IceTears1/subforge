@@ -17,6 +17,7 @@ const routes = [
       { path: 'convert', name: 'Convert', component: () => import('../views/Convert.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'apikeys', name: 'APIKeys', component: () => import('../views/APIKeys.vue') },
+      { path: 'monitor', name: 'Monitor', component: () => import('../views/Monitor.vue') },
       { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
     ],
   },

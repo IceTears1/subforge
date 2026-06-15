@@ -72,13 +72,16 @@
         </n-space>
       </n-space>
     </n-modal>
+
+    <ShareModal :show="showShare" :token="shareToken" @update:show="showShare = $event" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NInputNumber, NTag, NSelect, NText, NPopconfirm } from 'naive-ui'
-import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline } from '@vicons/ionicons5'
+import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline } from '@vicons/ionicons5'
+import ShareModal from '../components/ShareModal.vue'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
@@ -100,6 +103,8 @@ const nodeRegion = ref<string | null>(null)
 const tokenUrl = ref('')
 const tokenFormat = ref('clash')
 const selectedIds = ref<number[]>([])
+const showShare = ref(false)
+const shareToken = ref('')
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -161,6 +166,7 @@ const columns = [
           h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => viewNodes(row) }, { icon: () => h(NIcon, { component: EyeOutline }), default: () => '节点' }),
           h(NButton, { size: 'small', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { icon: () => h(NIcon, { component: CreateOutline }) }),
           h(NButton, { size: 'small', quaternary: true, type: 'success', onClick: () => viewToken(row) }, { icon: () => h(NIcon, { component: LinkOutline }) }),
+          h(NButton, { size: 'small', quaternary: true, onClick: () => openShare(row) }, { icon: () => h(NIcon, { component: ShareOutline }) }),
           h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => handleRefresh(row) }, { icon: () => h(NIcon, { component: RefreshOutline }) }),
           h(NButton, { size: 'small', quaternary: true, onClick: () => handleCheck(row) }, { icon: () => h(NIcon, { component: PulseOutline }), default: () => '检测' }),
           h(NPopconfirm, { onPositiveClick: () => handleDelete(row) }, {
@@ -285,6 +291,15 @@ function updateTokenUrl(format: string) {
 function copyToken() {
   navigator.clipboard.writeText(tokenUrl.value)
   message.success('已复制')
+}
+
+async function openShare(sub: Subscription) {
+  try {
+    const { default: api } = await import('../api/request')
+    const res = await api.get(`/subscriptions/${sub.id}/token`)
+    shareToken.value = res.data.token
+    showShare.value = true
+  } catch { message.error('获取订阅链接失败') }
 }
 
 onMounted(load)
