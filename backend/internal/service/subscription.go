@@ -16,7 +16,6 @@ import (
 	"subforge/internal/renderer"
 	"subforge/internal/smart"
 
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -102,7 +101,7 @@ func (s *SubscriptionService) Create(userID uint, req CreateSubRequest) (*model.
 		Name:        req.Name,
 		URL:         req.URL,
 		AutoRefresh: req.AutoRefresh,
-		Tags:        datatypes.JSON(tagsJSON),
+		Tags:        model.JSON(tagsJSON),
 		Status:      1,
 	}
 	if err := s.db.Create(sub).Error; err != nil {
@@ -189,7 +188,7 @@ func (s *SubscriptionService) refreshSub(sub *model.Subscription) error {
 			Port:           n.Port,
 			Region:         region,
 			RawURI:         "",
-			ConfigJSON:     datatypes.JSON(configJSON),
+			ConfigJSON:     model.JSON(configJSON),
 			Status:         1,
 		}
 		if err := tx.Create(&dbNode).Error; err != nil {

@@ -2,8 +2,6 @@ package model
 
 import (
 	"time"
-
-	"gorm.io/datatypes"
 )
 
 type Node struct {
@@ -16,7 +14,7 @@ type Node struct {
 	Port           int            `json:"port"`
 	Region         string         `json:"region" gorm:"size:64;index"`
 	RawURI         string         `json:"raw_uri" gorm:"type:text"`
-	ConfigJSON     datatypes.JSON `json:"config_json" gorm:"type:jsonb"`
+	ConfigJSON     JSON           `json:"config_json" gorm:"type:jsonb"`
 	Latency        int            `json:"latency"`
 	LastCheck      *time.Time     `json:"last_check,omitempty"`
 	Status         int8           `json:"status" gorm:"default:1"`
