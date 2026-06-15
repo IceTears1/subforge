@@ -21,11 +21,6 @@ ADMIN_PASSWORD=""
 DB_PASSWORD=""
 JWT_SECRET=""
 
-# Docker image registry (GitHub Container Registry)
-REGISTRY="ghcr.io"
-BACKEND_IMAGE="${REGISTRY}/icetears1/subforge-backend"
-FRONTEND_IMAGE="${REGISTRY}/icetears1/subforge-frontend"
-
 # ─── Functions ────────────────────────────────────────────────────────────────
 log()   { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -106,56 +101,33 @@ install_compose() {
     fi
 }
 
-login_registry() {
-    info "登录 Docker Registry..."
+optimize_docker() {
+    info "优化 Docker 配置..."
 
-    # Try to login to GitHub Container Registry
-    # Note: For public images, login is not required
-    # But we try anyway to avoid rate limits
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "oauth2" --password-stdin 2>/dev/null && \
-            log "Registry 登录成功" || \
-            warn "Registry 登录失败，将使用公共访问"
-    else
-        info "未设置 GITHUB_TOKEN，使用公共访问"
+    DAEMON_JSON="/etc/docker/daemon.json"
+    if [ -f "$DAEMON_JSON" ]; then
+        cp "$DAEMON_JSON" "${DAEMON_JSON}.bak.$(date +%s)"
     fi
+
+    cat > "$DAEMON_JSON" <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "storage-driver": "overlay2",
+  "live-restore": true
+}
+EOF
+
+    command -v systemctl &>/dev/null && systemctl restart docker 2>/dev/null || true
+    log "Docker 优化完成"
 }
 
-pull_images() {
-    info "拉取 Docker 镜像..."
-
-    # Get the commit SHA or use latest
-    COMMIT_SHA=$(cd "$INSTALL_DIR" && git rev-parse HEAD 2>/dev/null || echo "")
-
-    # Try to pull specific version first, then latest
-    if [ -n "$COMMIT_SHA" ]; then
-        docker pull "${BACKEND_IMAGE}:${COMMIT_SHA}" 2>/dev/null && \
-            BACKEND_TAG="$COMMIT_SHA" || \
-            BACKEND_TAG="latest"
-    else
-        BACKEND_TAG="latest"
-    fi
-
-    if [ -n "$COMMIT_SHA" ]; then
-        docker pull "${FRONTEND_IMAGE}:${COMMIT_SHA}" 2>/dev/null && \
-            FRONTEND_TAG="$COMMIT_SHA" || \
-            FRONTEND_TAG="latest"
-    else
-        FRONTEND_TAG="latest"
-    fi
-
-    # Pull images
-    docker pull "${BACKEND_IMAGE}:${BACKEND_TAG}" 2>/dev/null && \
-        log "后端镜像已拉取" || \
-        warn "后端镜像拉取失败，将使用本地构建"
-
-    docker pull "${FRONTEND_IMAGE}:${FRONTEND_TAG}" 2>/dev/null && \
-        log "前端镜像已拉取" || \
-        warn "前端镜像拉取失败，将使用本地构建"
-
-    # Export tags for docker-compose
-    export BACKEND_TAG
-    export FRONTEND_TAG
+clean_cache() {
+    info "清理缓存..."
+    docker container prune -f 2>/dev/null || true
+    docker image prune -f 2>/dev/null || true
+    docker network prune -f 2>/dev/null || true
+    log "缓存清理完成"
 }
 
 clone_repo() {
@@ -195,8 +167,6 @@ ADMIN_PASSWORD=${ADMIN_PASSWORD}
 CORS_ORIGINS=
 ADMIN_IP_WHITELIST=
 GIN_MODE=release
-BACKEND_IMAGE=${BACKEND_IMAGE}:${BACKEND_TAG:-latest}
-FRONTEND_IMAGE=${FRONTEND_IMAGE}:${FRONTEND_TAG:-latest}
 EOF
 
     log "配置已生成"
@@ -205,21 +175,14 @@ EOF
 start_services() {
     info "启动服务..."
 
+    cd "$INSTALL_DIR"
     docker compose down --remove-orphans 2>/dev/null || true
 
-    # Try to use pre-built images, fall back to build
-    if [ "${BACKEND_TAG:-}" = "latest" ] || [ -n "${BACKEND_TAG:-}" ]; then
-        info "使用预构建镜像..."
-        docker compose up -d 2>/dev/null || {
-            warn "预构建镜像不可用，使用本地构建..."
-            docker compose build --parallel 2>/dev/null || docker compose build
-            docker compose up -d
-        }
-    else
-        warn "使用本地构建..."
-        docker compose build --parallel 2>/dev/null || docker compose build
-        docker compose up -d
-    fi
+    # Build images (this takes time on first run)
+    info "构建 Docker 镜像（首次较慢）..."
+    docker compose build --parallel 2>&1 | tail -10 || docker compose build
+
+    docker compose up -d
 
     log "服务已启动"
 }
@@ -227,7 +190,7 @@ start_services() {
 wait_health() {
     info "等待服务就绪..."
 
-    local max=60
+    local max=90
     local count=0
 
     while [ $count -lt $max ]; do
@@ -253,35 +216,6 @@ get_public_ip() {
         fi
     done
     hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
-}
-
-clean_cache() {
-    info "清理缓存..."
-    docker container prune -f 2>/dev/null || true
-    docker image prune -f 2>/dev/null || true
-    docker network prune -f 2>/dev/null || true
-    log "缓存清理完成"
-}
-
-optimize_docker() {
-    info "优化 Docker 配置..."
-
-    DAEMON_JSON="/etc/docker/daemon.json"
-    if [ -f "$DAEMON_JSON" ]; then
-        cp "$DAEMON_JSON" "${DAEMON_JSON}.bak.$(date +%s)"
-    fi
-
-    cat > "$DAEMON_JSON" <<'EOF'
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" },
-  "storage-driver": "overlay2",
-  "live-restore": true
-}
-EOF
-
-    command -v systemctl &>/dev/null && systemctl restart docker 2>/dev/null || true
-    log "Docker 优化完成"
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -310,12 +244,6 @@ main() {
 
     # Setup project
     clone_repo
-
-    # Try to pull pre-built images
-    login_registry
-    pull_images
-
-    # Generate config and start
     generate_config
     start_services
     wait_health
