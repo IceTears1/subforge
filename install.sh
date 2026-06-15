@@ -43,105 +43,143 @@ gen_pass() {
     openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c "$1"
 }
 
+# Read from terminal (works with curl | bash)
+ask() {
+    local prompt="$1"
+    local default="$2"
+    local result
+    read -p "$(echo -e ${CYAN}${prompt} [${default}]: ${NC})" result < /dev/tty
+    echo "${result:-$default}"
+}
+
+ask_secret() {
+    local prompt="$1"
+    local result
+    read -s -p "$(echo -e ${CYAN}${prompt}: ${NC})" result < /dev/tty
+    echo ""
+    echo "$result"
+}
+
 confirm() {
     local prompt="$1"
     local default="${2:-y}"
-    if [ "$default" = "y" ]; then
-        read -p "$(echo -e ${CYAN}${prompt} [Y/n]: ${NC})" choice
-        choice=${choice:-y}
-    else
-        read -p "$(echo -e ${CYAN}${prompt} [y/N]: ${NC})" choice
-        choice=${choice:-n}
-    fi
+    local choice
+    read -p "$(echo -e ${CYAN}${prompt} [${default}]: ${NC})" choice < /dev/tty
+    choice=${choice:-$default}
     [[ "$choice" =~ ^[Yy]$ ]]
 }
 
 # ─────────────────────────────────────
-# Interactive Configuration
+# Check if piped (curl | bash)
+# ─────────────────────────────────────
+if [ -t 0 ]; then
+    # Direct execution, stdin is terminal
+    INTERACTIVE=true
+else
+    # Piped (curl | bash), need to read from /dev/tty
+    if [ -e /dev/tty ]; then
+        INTERACTIVE=true
+    else
+        INTERACTIVE=false
+        echo -e "${YELLOW}非交互模式，使用默认配置${NC}"
+    fi
+fi
+
+# ─────────────────────────────────────
+# Configuration
 # ─────────────────────────────────────
 echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
 echo -e "${YELLOW}${BOLD}         配置向导 Configuration${NC}"
 echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
 echo ""
 
-# Port
-echo -e "${CYAN}[1/5] 服务端口${NC}"
-echo -e "  ${DIM}SubForge Web 服务监听的端口${NC}"
-read -p "  端口 [8080]: " INPUT_PORT
-PORT=${INPUT_PORT:-8080}
-echo -e "  ${GREEN}✓ 端口: ${PORT}${NC}"
-echo ""
+if [ "$INTERACTIVE" = true ]; then
+    # Port
+    echo -e "${CYAN}[1/5] 服务端口${NC}"
+    echo -e "  ${DIM}SubForge Web 服务监听的端口${NC}"
+    PORT=$(ask "  端口" "8080")
+    echo -e "  ${GREEN}✓ 端口: ${PORT}${NC}"
+    echo ""
 
-# Admin password
-echo -e "${CYAN}[2/5] 管理员密码${NC}"
-echo -e "  ${DIM}admin 账户的登录密码${NC}"
-read -p "  密码 (留空自动生成): " INPUT_ADMIN
-if [ -z "$INPUT_ADMIN" ]; then
-    ADMIN_PASSWORD=$(gen_pass 16)
-    echo -e "  ${GREEN}✓ 已生成随机密码${NC}"
+    # Admin password
+    echo -e "${CYAN}[2/5] 管理员密码${NC}"
+    echo -e "  ${DIM}admin 账户的登录密码 (留空自动生成)${NC}"
+    INPUT_ADMIN=$(ask_secret "  密码")
+    if [ -z "$INPUT_ADMIN" ]; then
+        ADMIN_PASSWORD=$(gen_pass 16)
+        echo -e "  ${GREEN}✓ 已生成随机密码${NC}"
+    else
+        ADMIN_PASSWORD="$INPUT_ADMIN"
+        echo -e "  ${GREEN}✓ 已设置自定义密码${NC}"
+    fi
+    echo ""
+
+    # Database password
+    echo -e "${CYAN}[3/5] 数据库密码${NC}"
+    echo -e "  ${DIM}PostgreSQL 数据库密码${NC}"
+    if confirm "  自动生成? (推荐)" "y"; then
+        DB_PASSWORD=$(gen_pass 24)
+        echo -e "  ${GREEN}✓ 已生成随机密码${NC}"
+    else
+        DB_PASSWORD=$(ask_secret "  密码")
+        echo -e "  ${GREEN}✓ 已设置自定义密码${NC}"
+    fi
+    echo ""
+
+    # JWT Secret
+    echo -e "${CYAN}[4/5] JWT 密钥${NC}"
+    echo -e "  ${DIM}用于生成登录 Token，建议 32 位以上${NC}"
+    if confirm "  自动生成? (推荐)" "y"; then
+        JWT_SECRET=$(gen_pass 32)
+        echo -e "  ${GREEN}✓ 已生成随机密钥${NC}"
+    else
+        JWT_SECRET=$(ask_secret "  密钥")
+        echo -e "  ${GREEN}✓ 已设置自定义密钥${NC}"
+    fi
+    echo ""
+
+    # Domain (optional)
+    echo -e "${CYAN}[5/5] 域名 (可选)${NC}"
+    echo -e "  ${DIM}用于 HTTPS 配置，留空跳过${NC}"
+    DOMAIN=$(ask "  域名" "")
+    if [ -n "$DOMAIN" ]; then
+        echo -e "  ${GREEN}✓ 域名: ${DOMAIN}${NC}"
+    else
+        echo -e "  ${DIM}  跳过 HTTPS 配置${NC}"
+    fi
+    echo ""
+
+    # ─────────────────────────────────────
+    # Confirm
+    # ─────────────────────────────────────
+    echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${YELLOW}${BOLD}         确认配置 Summary${NC}"
+    echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${CYAN}端口:${NC}     ${PORT}"
+    echo -e "  ${CYAN}用户名:${NC}   admin"
+    echo -e "  ${CYAN}密码:${NC}     ${ADMIN_PASSWORD}"
+    echo -e "  ${CYAN}数据库:${NC}   subforge (${DB_PASSWORD:0:8}...)"
+    echo -e "  ${CYAN}JWT:${NC}      ${JWT_SECRET:0:8}..."
+    if [ -n "$DOMAIN" ]; then
+        echo -e "  ${CYAN}域名:${NC}     ${DOMAIN}"
+    fi
+    echo ""
+    echo -e "  ${DIM}安装目录: ${INSTALL_DIR}${NC}"
+    echo ""
+
+    if ! confirm "  确认安装?" "y"; then
+        echo -e "${RED}安装已取消${NC}"
+        exit 0
+    fi
 else
-    ADMIN_PASSWORD="$INPUT_ADMIN"
-    echo -e "  ${GREEN}✓ 已设置自定义密码${NC}"
-fi
-echo ""
-
-# Database password
-echo -e "${CYAN}[3/5] 数据库密码${NC}"
-echo -e "  ${DIM}PostgreSQL 数据库密码${NC}"
-if confirm "  自动生成? (推荐)" "y"; then
-    DB_PASSWORD=$(gen_pass 24)
-    echo -e "  ${GREEN}✓ 已生成随机密码${NC}"
-else
-    read -p "  密码: " DB_PASSWORD
-    echo -e "  ${GREEN}✓ 已设置自定义密码${NC}"
-fi
-echo ""
-
-# JWT Secret
-echo -e "${CYAN}[4/5] JWT 密钥${NC}"
-echo -e "  ${DIM}用于生成登录 Token，建议 32 位以上${NC}"
-if confirm "  自动生成? (推荐)" "y"; then
-    JWT_SECRET=$(gen_pass 32)
-    echo -e "  ${GREEN}✓ 已生成随机密钥${NC}"
-else
-    read -p "  密钥: " JWT_SECRET
-    echo -e "  ${GREEN}✓ 已设置自定义密钥${NC}"
-fi
-echo ""
-
-# Domain (optional)
-echo -e "${CYAN}[5/5] 域名 (可选)${NC}"
-echo -e "  ${DIM}用于 HTTPS 配置，留空跳过${NC}"
-read -p "  域名 (留空跳过): " DOMAIN
-if [ -n "$DOMAIN" ]; then
-    echo -e "  ${GREEN}✓ 域名: ${DOMAIN}${NC}"
-else
-    echo -e "  ${DIM}  跳过 HTTPS 配置${NC}"
-fi
-echo ""
-
-# ─────────────────────────────────────
-# Confirm
-# ─────────────────────────────────────
-echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
-echo -e "${YELLOW}${BOLD}         确认配置 Summary${NC}"
-echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
-echo ""
-echo -e "  ${CYAN}端口:${NC}     ${PORT}"
-echo -e "  ${CYAN}用户名:${NC}   admin"
-echo -e "  ${CYAN}密码:${NC}     ${ADMIN_PASSWORD}"
-echo -e "  ${CYAN}数据库:${NC}   subforge (${DB_PASSWORD:0:8}...)"
-echo -e "  ${CYAN}JWT:${NC}      ${JWT_SECRET:0:8}..."
-if [ -n "$DOMAIN" ]; then
-    echo -e "  ${CYAN}域名:${NC}     ${DOMAIN}"
-fi
-echo ""
-echo -e "  ${DIM}安装目录: ${INSTALL_DIR}${NC}"
-echo ""
-
-if ! confirm "  确认安装?" "y"; then
-    echo -e "${RED}安装已取消${NC}"
-    exit 0
+    # Non-interactive mode: use defaults or environment variables
+    PORT=${PORT:-8080}
+    ADMIN_PASSWORD=${ADMIN_PASSWORD:-$(gen_pass 16)}
+    DB_PASSWORD=${DB_PASSWORD:-$(gen_pass 24)}
+    JWT_SECRET=${JWT_SECRET:-$(gen_pass 32)}
+    DOMAIN=${DOMAIN:-}
+    echo -e "  ${DIM}使用默认配置或环境变量${NC}"
 fi
 
 echo ""
