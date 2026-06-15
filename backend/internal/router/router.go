@@ -20,6 +20,7 @@ func Setup(
 	profileH *handler.ProfileHandler,
 	exportH *handler.ExportHandler,
 	webhookH *handler.WebhookHandler,
+	batchH *handler.BatchHandler,
 	authSvc *service.AuthService,
 	cfg *config.Config,
 ) *gin.Engine {
@@ -97,6 +98,10 @@ func Setup(
 			subs.GET("/:id/nodes", subH.GetNodes)
 			subs.GET("/:id/token", subH.GetToken)
 		}
+
+		// Batch operations
+		api.POST("/subscriptions/batch/delete", batchH.BatchDelete)
+		api.POST("/subscriptions/batch/refresh", batchH.BatchRefresh)
 
 		// Export/Import
 		api.GET("/export", exportH.Export)

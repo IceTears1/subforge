@@ -1,11 +1,16 @@
 <template>
   <n-layout has-sider style="height: 100vh">
     <n-layout-sider
+      v-if="!isMobile"
       bordered
       :width="220"
       :collapsed-width="64"
       :native-scrollbar="false"
-      style="background: #fff"
+      :collapsed="collapsed"
+      show-trigger
+      @collapse="collapsed = true"
+      @expand="collapsed = false"
+      style="background: var(--n-color)"
     >
       <div class="logo">
         <span v-if="!collapsed">⚡ SubForge</span>
@@ -19,20 +24,36 @@
         :value="activeKey"
         @update:value="onMenuSelect"
       />
-      <div class="sidebar-footer">
-        <n-button quaternary @click="collapsed = !collapsed">
-          <template #icon>
-            <n-icon :component="collapsed ? MenuOutline : MenuOutline" />
-          </template>
-        </n-button>
-      </div>
     </n-layout-sider>
+
+    <!-- Mobile drawer -->
+    <n-drawer v-model:show="showMobileMenu" :width="240" placement="left">
+      <n-drawer-content>
+        <div class="logo">⚡ SubForge</div>
+        <n-menu
+          :options="menuOptions"
+          :value="activeKey"
+          @update:value="onMobileMenuSelect"
+        />
+      </n-drawer-content>
+    </n-drawer>
+
     <n-layout>
       <n-layout-header bordered style="height: 56px; display: flex; align-items: center; padding: 0 24px; justify-content: space-between;">
-        <n-breadcrumb>
-          <n-breadcrumb-item>{{ currentPageTitle }}</n-breadcrumb-item>
-        </n-breadcrumb>
         <n-space align="center">
+          <n-button v-if="isMobile" quaternary @click="showMobileMenu = true" class="mobile-menu-btn">
+            <template #icon><n-icon :component="MenuOutline" /></template>
+          </n-button>
+          <n-breadcrumb>
+            <n-breadcrumb-item>{{ currentPageTitle }}</n-breadcrumb-item>
+          </n-breadcrumb>
+        </n-space>
+        <n-space align="center">
+          <n-button quaternary @click="themeStore.toggle()">
+            <template #icon>
+              <n-icon :component="isDark ? SunnyOutline : MoonOutline" />
+            </template>
+          </n-button>
           <n-tag :bordered="false" type="info" size="small">{{ auth.user?.username }}</n-tag>
           <n-button quaternary size="small" @click="handleLogout">退出</n-button>
         </n-space>
@@ -45,17 +66,32 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref, computed } from 'vue'
+import { h, ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { NLayout, NLayoutSider, NLayoutHeader, NLayoutContent, NMenu, NButton, NIcon, NBreadcrumb, NBreadcrumbItem, NSpace, NTag } from 'naive-ui'
-import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline } from '@vicons/ionicons5'
+import {
+  NLayout, NLayoutSider, NLayoutHeader, NLayoutContent, NMenu, NButton, NIcon,
+  NBreadcrumb, NBreadcrumbItem, NSpace, NTag, NDrawer, NDrawerContent,
+} from 'naive-ui'
+import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth'
+import { useThemeStore } from '../stores/theme'
 import type { MenuOption } from 'naive-ui'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const themeStore = useThemeStore()
 const collapsed = ref(false)
+const showMobileMenu = ref(false)
+const isDark = computed(() => themeStore.isDark)
+
+// Responsive detection
+const isMobile = ref(window.innerWidth <= 768)
+function handleResize() {
+  isMobile.value = window.innerWidth <= 768
+}
+onMounted(() => window.addEventListener('resize', handleResize))
+onUnmounted(() => window.removeEventListener('resize', handleResize))
 
 const menuOptions: MenuOption[] = [
   { label: '仪表盘', key: '/', icon: () => h(NIcon, { component: GridOutline }) },
@@ -68,19 +104,17 @@ const menuOptions: MenuOption[] = [
 const activeKey = computed(() => route.path)
 const currentPageTitle = computed(() => {
   const map: Record<string, string> = {
-    '/': '仪表盘',
-    '/subscriptions': '订阅管理',
-    '/convert': '在线转换',
-    '/users': '子账户管理',
-    '/settings': '系统设置',
+    '/': '仪表盘', '/subscriptions': '订阅管理', '/convert': '在线转换',
+    '/users': '子账户管理', '/settings': '系统设置',
   }
   return map[route.path] || ''
 })
 
-function onMenuSelect(key: string) {
+function onMenuSelect(key: string) { router.push(key) }
+function onMobileMenuSelect(key: string) {
   router.push(key)
+  showMobileMenu.value = false
 }
-
 function handleLogout() {
   auth.logout()
   router.push('/login')
@@ -96,13 +130,6 @@ function handleLogout() {
   font-size: 18px;
   font-weight: 700;
   color: #6366f1;
-  border-bottom: 1px solid #f0f0f0;
-}
-.sidebar-footer {
-  position: absolute;
-  bottom: 16px;
-  width: 100%;
-  display: flex;
-  justify-content: center;
+  border-bottom: 1px solid var(--n-border-color);
 }
 </style>

@@ -74,3 +74,11 @@ export function exportSubscriptions() {
 export function importSubscriptions(data: any[]) {
   return api.post('/import', data)
 }
+
+export function batchDeleteSubscriptions(ids: number[]) {
+  return api.post('/subscriptions/batch/delete', { ids })
+}
+
+export function batchRefreshSubscriptions(ids: number[]) {
+  return api.post('/subscriptions/batch/refresh', { ids })
+}

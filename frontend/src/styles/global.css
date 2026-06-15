@@ -9,6 +9,12 @@ body {
   background-color: #f5f5f7;
   color: #1d1d1f;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+[data-theme="dark"] body {
+  background-color: #1a1a2e;
+  color: #e0e0e0;
 }
 
 #app {
@@ -19,11 +25,19 @@ body {
 .n-card {
   border: none !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow 0.2s ease, background-color 0.3s ease;
 }
 
 .n-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="dark"] .n-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-theme="dark"] .n-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
 /* Smooth transitions */
@@ -50,4 +64,48 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #4a4a6a;
+}
+
+/* Responsive breakpoints */
+@media (max-width: 768px) {
+  .n-grid {
+    gap: 12px !important;
+  }
+
+  .n-card {
+    border-radius: 8px !important;
+  }
+
+  .n-data-table {
+    font-size: 13px;
+  }
+
+  .stat-card .n-statistic-value {
+    font-size: 20px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .n-layout-sider {
+    display: none !important;
+  }
+
+  .n-layout {
+    margin-left: 0 !important;
+  }
+}
+
+/* Mobile menu button */
+.mobile-menu-btn {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .mobile-menu-btn {
+    display: flex;
+  }
 }

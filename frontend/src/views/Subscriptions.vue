@@ -4,13 +4,31 @@
       <template #header>
         <n-space justify="space-between" align="center">
           <span>订阅管理</span>
-          <n-button type="primary" @click="openAdd">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加订阅
-          </n-button>
+          <n-space>
+            <n-button v-if="selectedIds.length > 0" type="warning" @click="handleBatchRefresh">
+              刷新选中 ({{ selectedIds.length }})
+            </n-button>
+            <n-popconfirm v-if="selectedIds.length > 0" @positive-click="handleBatchDelete">
+              <template #trigger>
+                <n-button type="error">删除选中 ({{ selectedIds.length }})</n-button>
+              </template>
+              确认删除 {{ selectedIds.length }} 个订阅？
+            </n-popconfirm>
+            <n-button type="primary" @click="openAdd">
+              <template #icon><n-icon :component="AddOutline" /></template>
+              添加订阅
+            </n-button>
+          </n-space>
         </n-space>
       </template>
-      <n-data-table :columns="columns" :data="subscriptions" :loading="loading" :bordered="false" />
+      <n-data-table
+        :columns="columns"
+        :data="subscriptions"
+        :loading="loading"
+        :bordered="false"
+        :row-key="(row: Subscription) => row.id"
+        v-model:checked-row-keys="selectedIds"
+      />
     </n-card>
 
     <!-- Add/Edit Modal -->
@@ -63,7 +81,7 @@ import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, N
 import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline } from '@vicons/ionicons5'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
-  refreshSubscription, getNodes,
+  refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions,
 } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
@@ -81,6 +99,7 @@ const nodeSearch = ref('')
 const nodeRegion = ref<string | null>(null)
 const tokenUrl = ref('')
 const tokenFormat = ref('clash')
+const selectedIds = ref<number[]>([])
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -206,6 +225,23 @@ async function handleDelete(sub: Subscription) {
   await deleteSubscription(sub.id)
   message.success('已删除')
   await load()
+}
+
+async function handleBatchDelete() {
+  try {
+    const res = await batchDeleteSubscriptions(selectedIds.value)
+    message.success(`已删除 ${res.data.deleted} 个订阅`)
+    selectedIds.value = []
+    await load()
+  } catch { message.error('批量删除失败') }
+}
+
+async function handleBatchRefresh() {
+  try {
+    const res = await batchRefreshSubscriptions(selectedIds.value)
+    message.success(`已刷新 ${res.data.refreshed} 个订阅`)
+    await load()
+  } catch { message.error('批量刷新失败') }
 }
 
 async function viewNodes(sub: Subscription) {

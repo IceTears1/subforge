@@ -1,14 +1,21 @@
 <template>
-  <n-config-provider :theme-overrides="themeOverrides">
+  <n-config-provider :theme="isDark ? darkTheme : null" :theme-overrides="themeOverrides">
     <n-message-provider>
-      <router-view />
+      <n-notification-provider>
+        <router-view />
+      </n-notification-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <script setup lang="ts">
-import { NConfigProvider, NMessageProvider } from 'naive-ui'
+import { computed } from 'vue'
+import { NConfigProvider, NMessageProvider, NNotificationProvider, darkTheme } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
+import { useThemeStore } from './stores/theme'
+
+const themeStore = useThemeStore()
+const isDark = computed(() => themeStore.isDark)
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {

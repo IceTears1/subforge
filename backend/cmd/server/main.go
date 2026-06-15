@@ -52,9 +52,10 @@ func main() {
 	exportH := handler.NewExportHandler(subSvc)
 	webhookSvc := service.NewWebhookService(db)
 	webhookH := handler.NewWebhookHandler(webhookSvc)
+	batchH := handler.NewBatchHandler(subSvc)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{
