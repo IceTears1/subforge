@@ -15,6 +15,7 @@ NC='\033[0m'
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
 PORT=8080
+BACKEND_PORT=8081
 ADMIN_PASSWORD=""
 DB_PASSWORD=""
 JWT_SECRET=""
@@ -142,7 +143,7 @@ generate_config() {
     [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
 
     cat > .env <<EOF
-PORT=${PORT}
+PORT=${BACKEND_PORT}
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
@@ -154,6 +155,9 @@ CORS_ORIGINS=
 ADMIN_IP_WHITELIST=
 GIN_MODE=release
 EOF
+
+    # Also save the main port for reference
+    echo "NGINX_PORT=${PORT}" >> .env
 
     log "配置已生成"
 }
@@ -184,7 +188,7 @@ wait_health() {
     local count=0
 
     while [ $count -lt $max ]; do
-        if curl -sf "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
+        if curl -sf "http://localhost:${BACKEND_PORT}/api/health" >/dev/null 2>&1; then
             log "服务就绪 (${count}s)"
             return
         fi
