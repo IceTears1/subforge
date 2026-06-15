@@ -10,7 +10,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Config
-REPO="git@github.com:IceTears1/subforge.git"
+REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
 DEFAULT_PORT="8080"
 
@@ -119,15 +119,14 @@ if [ ! -f .env ]; then
     JWT_SECRET=$(gen_pass 32)
     ADMIN_PASSWORD=$(gen_pass 16)
 
-    cat > .env <<EOF
-PORT=${SERVICE_PORT}
-DB_NAME=subforge
-DB_USER=subforge
-DB_PASSWORD=${DB_PASSWORD}
-JWT_SECRET=${JWT_SECRET}
-JWT_EXPIRY=24h
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
+    # Write .env with actual values (not variable references)
+    echo "PORT=${SERVICE_PORT}" > .env
+    echo "DB_NAME=subforge" >> .env
+    echo "DB_USER=subforge" >> .env
+    echo "DB_PASSWORD=${DB_PASSWORD}" >> .env
+    echo "JWT_SECRET=${JWT_SECRET}" >> .env
+    echo "JWT_EXPIRY=24h" >> .env
+    echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env
     echo -e "  ${GREEN}Configuration generated${NC}"
 else
     sed -i "s/^PORT=.*/PORT=${SERVICE_PORT}/" .env
