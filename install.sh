@@ -21,6 +21,11 @@ ADMIN_PASSWORD=""
 DB_PASSWORD=""
 JWT_SECRET=""
 
+# Docker image registry (GitHub Container Registry)
+REGISTRY="ghcr.io"
+BACKEND_IMAGE="${REGISTRY}/icetears1/subforge-backend"
+FRONTEND_IMAGE="${REGISTRY}/icetears1/subforge-frontend"
+
 # ─── Functions ────────────────────────────────────────────────────────────────
 log()   { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -57,36 +62,6 @@ check_os() {
     info "系统: $OS_ID ($ARCH)"
 }
 
-get_pkg_manager() {
-    case "$OS_ID" in
-        ubuntu|debian|linuxmint|pop|*debian*|*ubuntu*)
-            PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y -qq"
-            ;;
-        centos|rhel|rocky|alma|fedora|*rhel*|*centos*|*fedora*)
-            if command -v dnf &>/dev/null; then
-                PKG_UPDATE="dnf makecache -q"
-                PKG_INSTALL="dnf install -y -q"
-            else
-                PKG_UPDATE="yum makecache -q"
-                PKG_INSTALL="yum install -y -q"
-            fi
-            ;;
-        alpine)
-            PKG_UPDATE="apk update -q"
-            PKG_INSTALL="apk add --no-cache"
-            ;;
-        arch|manjaro)
-            PKG_UPDATE="pacman -Sy"
-            PKG_INSTALL="pacman -S --noconfirm --needed"
-            ;;
-        *)
-            PKG_UPDATE=""
-            PKG_INSTALL=""
-            ;;
-    esac
-}
-
 install_docker() {
     info "检查 Docker..."
 
@@ -97,22 +72,12 @@ install_docker() {
 
     warn "正在安装 Docker..."
 
-    # Try official script
     if curl -fsSL https://get.docker.com | bash 2>/dev/null; then
-        log "Docker 安装完成"
-    elif [ -n "$PKG_INSTALL" ]; then
-        # Fallback to package manager
-        $PKG_UPDATE 2>/dev/null || true
-        case "$OS_ID" in
-            ubuntu|debian|linuxmint|pop) $PKG_INSTALL docker.io ;;
-            *) $PKG_INSTALL docker ;;
-        esac
         log "Docker 安装完成"
     else
         error "无法安装 Docker，请手动安装: https://docs.docker.com/engine/install/"
     fi
 
-    # Enable and start
     if command -v systemctl &>/dev/null; then
         systemctl enable docker 2>/dev/null || true
         systemctl start docker 2>/dev/null || true
@@ -132,52 +97,65 @@ install_compose() {
     COMPOSE_DIR="/usr/local/lib/docker/cli-plugins"
     mkdir -p "$COMPOSE_DIR"
 
-    # Try GitHub
     COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}"
     if curl -fsSL --connect-timeout 15 --retry 3 "$COMPOSE_URL" -o "$COMPOSE_DIR/docker-compose" 2>/dev/null; then
         chmod +x "$COMPOSE_DIR/docker-compose"
-        log "Docker Compose 安装完成"
-        return
-    fi
-
-    # Fallback
-    if [ -n "$PKG_INSTALL" ]; then
-        $PKG_INSTALL docker-compose-plugin 2>/dev/null || \
-        $PKG_INSTALL docker-compose 2>/dev/null || true
         log "Docker Compose 安装完成"
     else
         error "无法安装 Docker Compose"
     fi
 }
 
-optimize_docker() {
-    info "优化 Docker 配置..."
+login_registry() {
+    info "登录 Docker Registry..."
 
-    DAEMON_JSON="/etc/docker/daemon.json"
-    if [ -f "$DAEMON_JSON" ]; then
-        cp "$DAEMON_JSON" "${DAEMON_JSON}.bak.$(date +%s)"
+    # Try to login to GitHub Container Registry
+    # Note: For public images, login is not required
+    # But we try anyway to avoid rate limits
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        echo "$GITHUB_TOKEN" | docker login "$REGISTRY" -u "oauth2" --password-stdin 2>/dev/null && \
+            log "Registry 登录成功" || \
+            warn "Registry 登录失败，将使用公共访问"
+    else
+        info "未设置 GITHUB_TOKEN，使用公共访问"
+    fi
+}
+
+pull_images() {
+    info "拉取 Docker 镜像..."
+
+    # Get the commit SHA or use latest
+    COMMIT_SHA=$(cd "$INSTALL_DIR" && git rev-parse HEAD 2>/dev/null || echo "")
+
+    # Try to pull specific version first, then latest
+    if [ -n "$COMMIT_SHA" ]; then
+        docker pull "${BACKEND_IMAGE}:${COMMIT_SHA}" 2>/dev/null && \
+            BACKEND_TAG="$COMMIT_SHA" || \
+            BACKEND_TAG="latest"
+    else
+        BACKEND_TAG="latest"
     fi
 
-    cat > "$DAEMON_JSON" <<'EOF'
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" },
-  "storage-driver": "overlay2",
-  "live-restore": true
-}
-EOF
+    if [ -n "$COMMIT_SHA" ]; then
+        docker pull "${FRONTEND_IMAGE}:${COMMIT_SHA}" 2>/dev/null && \
+            FRONTEND_TAG="$COMMIT_SHA" || \
+            FRONTEND_TAG="latest"
+    else
+        FRONTEND_TAG="latest"
+    fi
 
-    command -v systemctl &>/dev/null && systemctl restart docker 2>/dev/null || true
-    log "Docker 优化完成"
-}
+    # Pull images
+    docker pull "${BACKEND_IMAGE}:${BACKEND_TAG}" 2>/dev/null && \
+        log "后端镜像已拉取" || \
+        warn "后端镜像拉取失败，将使用本地构建"
 
-clean_cache() {
-    info "清理缓存..."
-    docker container prune -f 2>/dev/null || true
-    docker image prune -f 2>/dev/null || true
-    docker network prune -f 2>/dev/null || true
-    docker builder prune -f --filter "until=168h" 2>/dev/null || true
-    log "缓存清理完成"
+    docker pull "${FRONTEND_IMAGE}:${FRONTEND_TAG}" 2>/dev/null && \
+        log "前端镜像已拉取" || \
+        warn "前端镜像拉取失败，将使用本地构建"
+
+    # Export tags for docker-compose
+    export BACKEND_TAG
+    export FRONTEND_TAG
 }
 
 clone_repo() {
@@ -201,7 +179,6 @@ clone_repo() {
 generate_config() {
     info "生成配置..."
 
-    # Generate secrets
     [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(gen_pass 24)
     [ -z "$JWT_SECRET" ] && JWT_SECRET=$(gen_pass 32)
     [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
@@ -218,6 +195,8 @@ ADMIN_PASSWORD=${ADMIN_PASSWORD}
 CORS_ORIGINS=
 ADMIN_IP_WHITELIST=
 GIN_MODE=release
+BACKEND_IMAGE=${BACKEND_IMAGE}:${BACKEND_TAG:-latest}
+FRONTEND_IMAGE=${FRONTEND_IMAGE}:${FRONTEND_TAG:-latest}
 EOF
 
     log "配置已生成"
@@ -227,8 +206,20 @@ start_services() {
     info "启动服务..."
 
     docker compose down --remove-orphans 2>/dev/null || true
-    docker compose build --parallel 2>/dev/null || docker compose build
-    docker compose up -d
+
+    # Try to use pre-built images, fall back to build
+    if [ "${BACKEND_TAG:-}" = "latest" ] || [ -n "${BACKEND_TAG:-}" ]; then
+        info "使用预构建镜像..."
+        docker compose up -d 2>/dev/null || {
+            warn "预构建镜像不可用，使用本地构建..."
+            docker compose build --parallel 2>/dev/null || docker compose build
+            docker compose up -d
+        }
+    else
+        warn "使用本地构建..."
+        docker compose build --parallel 2>/dev/null || docker compose build
+        docker compose up -d
+    fi
 
     log "服务已启动"
 }
@@ -264,6 +255,35 @@ get_public_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
 }
 
+clean_cache() {
+    info "清理缓存..."
+    docker container prune -f 2>/dev/null || true
+    docker image prune -f 2>/dev/null || true
+    docker network prune -f 2>/dev/null || true
+    log "缓存清理完成"
+}
+
+optimize_docker() {
+    info "优化 Docker 配置..."
+
+    DAEMON_JSON="/etc/docker/daemon.json"
+    if [ -f "$DAEMON_JSON" ]; then
+        cp "$DAEMON_JSON" "${DAEMON_JSON}.bak.$(date +%s)"
+    fi
+
+    cat > "$DAEMON_JSON" <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "storage-driver": "overlay2",
+  "live-restore": true
+}
+EOF
+
+    command -v systemctl &>/dev/null && systemctl restart docker 2>/dev/null || true
+    log "Docker 优化完成"
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
     echo ""
@@ -279,7 +299,6 @@ main() {
 
     check_root
     check_os
-    get_pkg_manager
 
     # Clean cache
     clean_cache
@@ -291,6 +310,12 @@ main() {
 
     # Setup project
     clone_repo
+
+    # Try to pull pre-built images
+    login_registry
+    pull_images
+
+    # Generate config and start
     generate_config
     start_services
     wait_health

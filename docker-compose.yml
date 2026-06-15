@@ -29,6 +29,7 @@ services:
       - subforge
 
   backend:
+    image: ${BACKEND_IMAGE:-}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -67,6 +68,7 @@ services:
       - subforge
 
   frontend:
+    image: ${FRONTEND_IMAGE:-}
     build:
       context: ./frontend
       dockerfile: Dockerfile
