@@ -82,3 +82,7 @@ export function batchDeleteSubscriptions(ids: number[]) {
 export function batchRefreshSubscriptions(ids: number[]) {
   return api.post('/subscriptions/batch/refresh', { ids })
 }
+
+export function checkSubscriptionHealth(id: number) {
+  return api.post(`/subscriptions/${id}/check`)
+}

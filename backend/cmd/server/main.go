@@ -42,8 +42,13 @@ func main() {
 	scheduler := service.NewScheduler(db, subSvc)
 	scheduler.Start()
 
+	// Init services
+	auditSvc := service.NewAuditService(db)
+	auditSvc.Migrate()
+	healthSvc := service.NewHealthService(db)
+
 	// Init handlers
-	authH := handler.NewAuthHandler(authSvc)
+	authH := handler.NewAuthHandler(authSvc, auditSvc)
 	userH := handler.NewUserHandler(userSvc)
 	subH := handler.NewSubscriptionHandler(subSvc)
 	convertH := handler.NewConvertHandler(convertSvc)
@@ -53,9 +58,11 @@ func main() {
 	webhookSvc := service.NewWebhookService(db)
 	webhookH := handler.NewWebhookHandler(webhookSvc)
 	batchH := handler.NewBatchHandler(subSvc)
+	healthH := handler.NewHealthHandler(healthSvc)
+	auditH := handler.NewAuditHandler(auditSvc)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{

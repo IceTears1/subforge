@@ -45,4 +45,10 @@ CREATE TABLE IF NOT EXISTS nodes (
 
 CREATE INDEX IF NOT EXISTS idx_nodes_sub ON nodes(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_region ON nodes(region);
+CREATE INDEX IF NOT EXISTS idx_nodes_server ON nodes(server);
+CREATE INDEX IF NOT EXISTS idx_nodes_latency ON nodes(latency);
 CREATE INDEX IF NOT EXISTS idx_subs_user ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_subs_token ON subscriptions(token);
+CREATE INDEX IF NOT EXISTS idx_subs_status ON subscriptions(status);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);

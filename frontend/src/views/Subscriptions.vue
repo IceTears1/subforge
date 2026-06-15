@@ -78,10 +78,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NInputNumber, NTag, NSelect, NText, NPopconfirm } from 'naive-ui'
-import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline } from '@vicons/ionicons5'
+import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline } from '@vicons/ionicons5'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
-  refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions,
+  refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
 } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
@@ -154,7 +154,7 @@ const columns = [
     },
   },
   {
-    title: '操作', key: 'actions', width: 280,
+    title: '操作', key: 'actions', width: 320,
     render(row: Subscription) {
       return h(NSpace, { size: 'small' }, {
         default: () => [
@@ -162,6 +162,7 @@ const columns = [
           h(NButton, { size: 'small', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { icon: () => h(NIcon, { component: CreateOutline }) }),
           h(NButton, { size: 'small', quaternary: true, type: 'success', onClick: () => viewToken(row) }, { icon: () => h(NIcon, { component: LinkOutline }) }),
           h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => handleRefresh(row) }, { icon: () => h(NIcon, { component: RefreshOutline }) }),
+          h(NButton, { size: 'small', quaternary: true, onClick: () => handleCheck(row) }, { icon: () => h(NIcon, { component: PulseOutline }), default: () => '检测' }),
           h(NPopconfirm, { onPositiveClick: () => handleDelete(row) }, {
             trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, { icon: () => h(NIcon, { component: TrashOutline }) }),
             default: () => '确认删除？',
@@ -242,6 +243,14 @@ async function handleBatchRefresh() {
     message.success(`已刷新 ${res.data.refreshed} 个订阅`)
     await load()
   } catch { message.error('批量刷新失败') }
+}
+
+async function handleCheck(sub: Subscription) {
+  try {
+    const res = await checkSubscriptionHealth(sub.id)
+    const { total, online, offline } = res.data
+    message.success(`检测完成: ${online}/${total} 在线, ${offline} 离线`)
+  } catch { message.error('检测失败') }
 }
 
 async function viewNodes(sub: Subscription) {

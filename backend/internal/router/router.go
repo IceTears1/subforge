@@ -21,6 +21,8 @@ func Setup(
 	exportH *handler.ExportHandler,
 	webhookH *handler.WebhookHandler,
 	batchH *handler.BatchHandler,
+	healthH *handler.HealthHandler,
+	auditH *handler.AuditHandler,
 	authSvc *service.AuthService,
 	cfg *config.Config,
 ) *gin.Engine {
@@ -66,6 +68,7 @@ func Setup(
 
 	// Auth middleware
 	authMW := handler.AuthMiddleware(authSvc)
+	adminRequired := handler.AdminRequired()
 
 	// Protected routes
 	api := r.Group("/api")
@@ -114,6 +117,12 @@ func Setup(
 			webhooks.POST("", webhookH.Create)
 			webhooks.DELETE("/:id", webhookH.Delete)
 		}
+
+		// Health check
+		api.POST("/subscriptions/:id/check", healthH.CheckSubscription)
+
+		// Audit logs (admin only)
+		api.GET("/audit", adminRequired, auditH.List)
 
 		// Convert
 		api.POST("/convert", convertH.Convert)
