@@ -28,6 +28,7 @@ func Setup(
 	apiKeyH *handler.APIKeyHandler,
 	updateH *handler.UpdateHandler,
 	schedulerH *handler.SchedulerHandler,
+	backupH *handler.BackupHandler,
 	apiKeySvc *service.APIKeyService,
 	authSvc *service.AuthService,
 	cfg *config.Config,
@@ -176,6 +177,18 @@ func Setup(
 		// Scheduler (admin only)
 		api.GET("/scheduler/stats", adminRequired, schedulerH.GetStats)
 		api.POST("/scheduler/refresh", adminRequired, schedulerH.ForceRefresh)
+
+		// Backup/Restore (admin only)
+		backup := api.Group("/backup")
+		backup.Use(adminRequired)
+		{
+			backup.GET("", backupH.ListBackups)
+			backup.POST("", backupH.CreateBackup)
+			backup.POST("/restore", backupH.RestoreBackup)
+			backup.POST("/import", backupH.ImportBackup)
+			backup.GET("/:id/export", backupH.ExportBackup)
+			backup.DELETE("/:id", backupH.DeleteBackup)
+		}
 
 		// Convert
 		api.POST("/convert", convertH.Convert)
