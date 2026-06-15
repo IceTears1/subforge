@@ -29,7 +29,7 @@
                 检查更新
               </n-button>
               <n-button
-                v-if="versionInfo.has_update"
+                v-if="versionInfo.has_update && !versionInfo.updating"
                 type="warning"
                 :loading="updating"
                 @click="handleUpdate"
@@ -37,7 +37,51 @@
                 <template #icon><n-icon :component="CloudDownloadOutline" /></template>
                 立即更新
               </n-button>
+              <n-button
+                v-if="versionInfo.updating"
+                type="info"
+                loading
+              >
+                更新中...
+              </n-button>
             </n-space>
+          </n-space>
+        </n-card>
+
+        <!-- Update Progress -->
+        <n-card v-if="updateResult" title="更新进度" :bordered="false" style="margin-top: 24px">
+          <n-space vertical>
+            <n-alert :type="updateResult.success ? 'success' : 'error'">
+              {{ updateResult.success ? '更新成功！' : '更新失败' }}
+              {{ updateResult.error ? ': ' + updateResult.error : '' }}
+            </n-alert>
+
+            <n-timeline>
+              <n-timeline-item
+                v-for="step in updateResult.steps"
+                :key="step.name"
+                :type="getStepType(step.status)"
+                :title="step.name"
+                :content="step.message"
+              />
+            </n-timeline>
+
+            <n-descriptions :column="2" bordered size="small">
+              <n-descriptions-item label="原版本">
+                <n-tag size="small">{{ updateResult.from }}</n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="新版本">
+                <n-tag size="small" type="success">{{ updateResult.to }}</n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="时间">
+                {{ new Date(updateResult.timestamp).toLocaleString() }}
+              </n-descriptions-item>
+              <n-descriptions-item label="状态">
+                <n-tag :type="updateResult.success ? 'success' : 'error'" size="small">
+                  {{ updateResult.success ? '成功' : '失败' }}
+                </n-tag>
+              </n-descriptions-item>
+            </n-descriptions>
           </n-space>
         </n-card>
 
@@ -54,7 +98,7 @@
             />
             <n-button
               type="error"
-              :disabled="!rollbackTarget"
+              :disabled="!rollbackTarget || versionInfo.updating"
               :loading="rollingBack"
               @click="handleRollback"
             >
@@ -81,41 +125,14 @@
         </n-card>
       </n-gi>
     </n-grid>
-
-    <!-- Update Result Modal -->
-    <n-modal v-model:show="showResult" preset="card" title="更新结果" style="width: 500px">
-      <n-space vertical>
-        <n-alert :type="updateResult?.success ? 'success' : 'error'">
-          {{ updateResult?.success ? '更新成功' : '更新失败' }}
-        </n-alert>
-        <n-descriptions :column="1" bordered>
-          <n-descriptions-item label="原版本">
-            <n-tag>{{ updateResult?.from }}</n-tag>
-          </n-descriptions-item>
-          <n-descriptions-item label="新版本">
-            <n-tag type="success">{{ updateResult?.to }}</n-tag>
-          </n-descriptions-item>
-          <n-descriptions-item label="时间">
-            {{ updateResult?.timestamp ? new Date(updateResult.timestamp).toLocaleString() : '-' }}
-          </n-descriptions-item>
-        </n-descriptions>
-        <n-input
-          v-if="updateResult?.message"
-          :value="updateResult.message"
-          type="textarea"
-          :rows="5"
-          readonly
-        />
-      </n-space>
-    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useMessage, NGrid, NGi, NCard, NDescriptions, NDescriptionsItem, NTag, NSpace, NButton, NIcon, NSelect, NAlert, NTimeline, NTimelineItem, NSpin, NModal, NInput } from 'naive-ui'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useMessage, NGrid, NGi, NCard, NDescriptions, NDescriptionsItem, NTag, NSpace, NButton, NIcon, NSelect, NAlert, NTimeline, NTimelineItem, NSpin } from 'naive-ui'
 import { RefreshOutline, CloudDownloadOutline } from '@vicons/ionicons5'
-import { getVersion, getChangelog, performUpdate, performRollback } from '../api/update'
+import { getVersion, getUpdateStatus, getChangelog, performUpdate, performRollback } from '../api/update'
 import type { VersionInfo, VersionEntry, UpdateResult } from '../api/update'
 
 const message = useMessage()
@@ -124,11 +141,11 @@ const checking = ref(false)
 const updating = ref(false)
 const rollingBack = ref(false)
 const loadingChangelog = ref(false)
-const showResult = ref(false)
-const versionInfo = ref<VersionInfo>({ current: '', latest: '', has_update: false, changelog: '', last_check: '' })
+const versionInfo = ref<VersionInfo>({ current: '', latest: '', has_update: false, changelog: '', last_check: '', updating: false })
 const changelog = ref<VersionEntry[]>([])
 const rollbackTarget = ref<string | null>(null)
 const updateResult = ref<UpdateResult | null>(null)
+let statusTimer: number | null = null
 
 const versionOptions = computed(() =>
   changelog.value.map(v => ({
@@ -136,6 +153,15 @@ const versionOptions = computed(() =>
     value: v.hash,
   }))
 )
+
+function getStepType(status: string) {
+  switch (status) {
+    case 'success': return 'success'
+    case 'failed': return 'error'
+    case 'running': return 'info'
+    default: return 'default'
+  }
+}
 
 function formatDate(dateStr: string) {
   try {
@@ -150,6 +176,9 @@ async function checkVersion() {
   try {
     const res = await getVersion()
     versionInfo.value = res.data
+    if (res.data.last_update) {
+      updateResult.value = res.data.last_update
+    }
     message.success('版本信息已更新')
   } catch (e: any) {
     message.error('检查版本失败: ' + (e.response?.data?.message || e.message))
@@ -168,40 +197,71 @@ async function loadChangelog() {
   }
 }
 
+async function pollUpdateStatus() {
+  try {
+    const res = await getUpdateStatus()
+    versionInfo.value.updating = res.data.updating
+    if (res.data.last_result) {
+      updateResult.value = res.data.last_result
+    }
+    if (!res.data.updating && statusTimer) {
+      clearInterval(statusTimer)
+      statusTimer = null
+      updating.value = false
+      checkVersion()
+      loadChangelog()
+    }
+  } catch {}
+}
+
 async function handleUpdate() {
   updating.value = true
+  updateResult.value = null
+
   try {
     const res = await performUpdate()
     updateResult.value = res.data
-    showResult.value = true
+
     if (res.data.success) {
       message.success('更新成功！服务正在重启...')
-      // Refresh version info after delay
-      setTimeout(checkVersion, 5000)
-      setTimeout(loadChangelog, 5000)
     } else {
-      message.error('更新失败')
+      message.error('更新失败: ' + (res.data.error || '未知错误'))
     }
   } catch (e: any) {
     message.error('更新失败: ' + (e.response?.data?.message || e.message))
-  } finally {
     updating.value = false
+    return
   }
+
+  // Start polling for status
+  statusTimer = window.setInterval(pollUpdateStatus, 3000)
+  // Stop polling after 5 minutes
+  setTimeout(() => {
+    if (statusTimer) {
+      clearInterval(statusTimer)
+      statusTimer = null
+      updating.value = false
+    }
+  }, 300000)
 }
 
 async function handleRollback() {
   if (!rollbackTarget.value) return
   rollingBack.value = true
+  updateResult.value = null
+
   try {
     const res = await performRollback(rollbackTarget.value)
     updateResult.value = res.data
-    showResult.value = true
+
     if (res.data.success) {
       message.success('回滚成功！服务正在重启...')
-      setTimeout(checkVersion, 5000)
-      setTimeout(loadChangelog, 5000)
+      setTimeout(() => {
+        checkVersion()
+        loadChangelog()
+      }, 5000)
     } else {
-      message.error('回滚失败')
+      message.error('回滚失败: ' + (res.data.error || '未知错误'))
     }
   } catch (e: any) {
     message.error('回滚失败: ' + (e.response?.data?.message || e.message))
@@ -214,5 +274,14 @@ onMounted(() => {
   checkVersion()
   loadChangelog()
   window.addEventListener('resize', () => { isMobile.value = window.innerWidth <= 768 })
+
+  // Check if update is in progress
+  pollUpdateStatus()
+})
+
+onUnmounted(() => {
+  if (statusTimer) {
+    clearInterval(statusTimer)
+  }
 })
 </script>

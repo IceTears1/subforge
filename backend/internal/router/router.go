@@ -164,6 +164,7 @@ func Setup(
 		update.Use(adminRequired)
 		{
 			update.GET("/version", updateH.GetVersion)
+			update.GET("/status", updateH.GetUpdateStatus)
 			update.GET("/changelog", updateH.GetChangelog)
 			update.POST("", updateH.Update)
 			update.POST("/rollback", updateH.Rollback)

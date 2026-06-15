@@ -24,13 +24,29 @@ func (h *UpdateHandler) GetVersion(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	response.OK(c, info)
+
+	// Add update status
+	data := gin.H{
+		"current":    info.Current,
+		"latest":     info.Latest,
+		"has_update": info.HasUpdate,
+		"changelog":  info.Changelog,
+		"last_check": info.LastCheck,
+		"updating":   h.svc.IsUpdating(),
+	}
+
+	// Add last result if available
+	if lastResult := h.svc.GetLastResult(); lastResult != nil {
+		data["last_update"] = lastResult
+	}
+
+	response.OK(c, data)
 }
 
 // GetChangelog returns recent commits.
 func (h *UpdateHandler) GetChangelog(c *gin.Context) {
 	count, _ := strconv.Atoi(c.DefaultQuery("count", "20"))
-	versions, err := h.svc.GetRecentVersions(count)
+	versions, err := h.svc.GetChangelog(count)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -43,6 +59,11 @@ func (h *UpdateHandler) Update(c *gin.Context) {
 	userID := getUserID(c)
 	ip := c.ClientIP()
 
+	if h.svc.IsUpdating() {
+		response.BadRequest(c, "update already in progress")
+		return
+	}
+
 	result, err := h.svc.Update()
 	if err != nil {
 		h.audit.Log(userID, "", "update", "system", "update failed: "+err.Error(), ip, false)
@@ -52,6 +73,14 @@ func (h *UpdateHandler) Update(c *gin.Context) {
 
 	h.audit.Log(userID, "", "update", "system", "updated: "+result.From+" → "+result.To, ip, true)
 	response.OK(c, result)
+}
+
+// GetUpdateStatus returns current update status.
+func (h *UpdateHandler) GetUpdateStatus(c *gin.Context) {
+	response.OK(c, gin.H{
+		"updating":    h.svc.IsUpdating(),
+		"last_result": h.svc.GetLastResult(),
+	})
 }
 
 // Rollback rolls back to a specific version.
