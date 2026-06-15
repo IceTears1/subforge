@@ -49,6 +49,16 @@ docker compose up -d
 | 数据库 | PostgreSQL 15 |
 | 部署 | Docker Compose + Nginx |
 
+## 📚 文档
+
+| 文档 | 说明 |
+|------|------|
+| [用户手册](docs/user-guide.md) | 完整的用户使用指南 |
+| [API 文档](docs/api.md) | RESTful API 接口说明 |
+| [开发文档](docs/development.md) | 开发环境搭建和架构说明 |
+| [部署文档](docs/deployment.md) | 详细的部署和运维指南 |
+| [更新日志](CHANGELOG.md) | 版本更新记录 |
+
 ## API 接口
 
 ```bash
