@@ -99,8 +99,8 @@ const columns = [
 async function load() {
   loading.value = true
   try {
-    const res = await getUsers()
-    users.value = res.data
+    const res = await getUsers(1, 100)
+    users.value = res.data.items || res.data
   } catch {
     message.error('加载失败')
   } finally {

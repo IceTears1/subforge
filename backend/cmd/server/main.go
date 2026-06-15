@@ -49,9 +49,10 @@ func main() {
 	convertH := handler.NewConvertHandler(convertSvc)
 	publicH := handler.NewPublicHandler(subSvc)
 	profileH := handler.NewProfileHandler(userSvc)
+	exportH := handler.NewExportHandler(subSvc)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{

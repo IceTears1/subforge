@@ -17,12 +17,22 @@ func NewUserHandler(svc *service.UserService) *UserHandler {
 }
 
 func (h *UserHandler) List(c *gin.Context) {
-	users, err := h.svc.List(nil)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 { page = 1 }
+	if pageSize < 1 || pageSize > 100 { pageSize = 20 }
+
+	users, total, err := h.svc.ListPaged(page, pageSize)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
-	response.OK(c, users)
+	response.OK(c, gin.H{
+		"items":     users,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
 func (h *UserHandler) Create(c *gin.Context) {

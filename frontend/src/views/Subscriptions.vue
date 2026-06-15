@@ -165,8 +165,8 @@ const nodeColumns = [
 async function load() {
   loading.value = true
   try {
-    const res = await getSubscriptions()
-    subscriptions.value = res.data
+    const res = await getSubscriptions(1, 100)
+    subscriptions.value = res.data.items || res.data
   } catch { message.error('加载失败') } finally { loading.value = false }
 }
 

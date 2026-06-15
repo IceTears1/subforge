@@ -9,8 +9,8 @@ export interface User {
   created_at: string
 }
 
-export function getUsers() {
-  return api.get<User[]>('/users')
+export function getUsers(page = 1, pageSize = 20) {
+  return api.get('/users', { params: { page, page_size: pageSize } })
 }
 
 export function createUser(username: string, password: string) {

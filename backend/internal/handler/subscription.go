@@ -18,12 +18,22 @@ func NewSubscriptionHandler(svc *service.SubscriptionService) *SubscriptionHandl
 
 func (h *SubscriptionHandler) List(c *gin.Context) {
 	userID := getUserID(c)
-	subs, err := h.svc.List(userID)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 { page = 1 }
+	if pageSize < 1 || pageSize > 100 { pageSize = 20 }
+
+	subs, total, err := h.svc.ListPaged(userID, page, pageSize)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
-	response.OK(c, subs)
+	response.OK(c, gin.H{
+		"items":     subs,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
 func (h *SubscriptionHandler) Get(c *gin.Context) {

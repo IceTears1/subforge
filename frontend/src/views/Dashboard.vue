@@ -87,20 +87,21 @@ onMounted(async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await getSubscriptions()
-    recentSubs.value = res.data.slice(0, 10)
-    stats.value.subscriptions = res.data.length
-    stats.value.nodes = res.data.reduce((sum: number, s: Subscription) => sum + s.node_count, 0)
+    const res = await getSubscriptions(1, 50)
+    const items = res.data.items || res.data
+    recentSubs.value = items.slice(0, 10)
+    stats.value.subscriptions = res.data.total || items.length
+    stats.value.nodes = items.reduce((sum: number, s: Subscription) => sum + s.node_count, 0)
 
     // Count unique regions from actual nodes
     const regionSet = new Set<string>()
-    for (const sub of res.data.slice(0, 5)) { // sample first 5 subs
+    for (const sub of items.slice(0, 5)) {
       try {
         const nodesRes = await getNodes(sub.id)
         nodesRes.data.forEach((n: any) => { if (n.region) regionSet.add(n.region) })
       } catch { /* skip */ }
     }
-    stats.value.regions = regionSet.size || res.data.length
+    stats.value.regions = regionSet.size || items.length
     stats.value.healthy = true
   } catch (e: any) {
     error.value = e.response?.data?.message || '加载失败，请检查服务状态'

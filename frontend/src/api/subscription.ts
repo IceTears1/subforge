@@ -27,8 +27,8 @@ export interface Node {
   status: number
 }
 
-export function getSubscriptions() {
-  return api.get<Subscription[]>('/subscriptions')
+export function getSubscriptions(page = 1, pageSize = 20) {
+  return api.get('/subscriptions', { params: { page, page_size: pageSize } })
 }
 
 export function getSubscription(id: number) {
@@ -65,4 +65,12 @@ export function detectFormat(source: string) {
 
 export function getFormats() {
   return api.get('/formats')
+}
+
+export function exportSubscriptions() {
+  return api.get('/export', { responseType: 'blob' })
+}
+
+export function importSubscriptions(data: any[]) {
+  return api.post('/import', data)
 }

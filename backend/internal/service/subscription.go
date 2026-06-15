@@ -29,16 +29,48 @@ func NewSubscriptionService(db *gorm.DB) *SubscriptionService {
 }
 
 type CreateSubRequest struct {
-	Name        string   `json:"name" binding:"required"`
-	URL         string   `json:"url" binding:"required,url"`
+	Name        string   `json:"name" binding:"required,max=128"`
+	URL         string   `json:"url" binding:"required,url,max=2048"`
 	AutoRefresh int      `json:"auto_refresh"`
 	Tags        []string `json:"tags"`
+}
+
+func (r *CreateSubRequest) Validate() error {
+	if len(r.Name) == 0 || len(r.Name) > 128 {
+		return fmt.Errorf("name must be 1-128 characters")
+	}
+	if len(r.URL) > 2048 {
+		return fmt.Errorf("url too long (max 2048)")
+	}
+	// Only allow http/https
+	if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
+		return fmt.Errorf("url must start with http:// or https://")
+	}
+	if r.AutoRefresh < 0 {
+		r.AutoRefresh = 3600
+	}
+	if r.AutoRefresh > 0 && r.AutoRefresh < 60 {
+		r.AutoRefresh = 60
+	}
+	return nil
 }
 
 func (s *SubscriptionService) List(userID uint) ([]model.Subscription, error) {
 	var subs []model.Subscription
 	err := s.db.Where("user_id = ?", userID).Order("id ASC").Find(&subs).Error
 	return subs, err
+}
+
+func (s *SubscriptionService) ListPaged(userID uint, page, pageSize int) ([]model.Subscription, int64, error) {
+	var subs []model.Subscription
+	var total int64
+	q := s.db.Model(&model.Subscription{}).Where("user_id = ?", userID)
+	q.Count(&total)
+	err := q.Order("id ASC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&subs).Error
+	return subs, total, err
 }
 
 func (s *SubscriptionService) Get(id, userID uint) (*model.Subscription, error) {
@@ -53,6 +85,9 @@ func (s *SubscriptionService) Get(id, userID uint) (*model.Subscription, error) 
 }
 
 func (s *SubscriptionService) Create(userID uint, req CreateSubRequest) (*model.Subscription, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
 	tagsJSON, _ := json.Marshal(req.Tags)
 	if req.AutoRefresh == 0 {
 		req.AutoRefresh = 3600
@@ -75,6 +110,9 @@ func (s *SubscriptionService) Create(userID uint, req CreateSubRequest) (*model.
 }
 
 func (s *SubscriptionService) Update(id, userID uint, req CreateSubRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
 	tagsJSON, _ := json.Marshal(req.Tags)
 	return s.db.Model(&model.Subscription{}).
 		Where("id = ? AND user_id = ?", id, userID).

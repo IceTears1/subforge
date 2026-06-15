@@ -18,6 +18,7 @@ func Setup(
 	convertH *handler.ConvertHandler,
 	publicH *handler.PublicHandler,
 	profileH *handler.ProfileHandler,
+	exportH *handler.ExportHandler,
 	authSvc *service.AuthService,
 	cfg *config.Config,
 ) *gin.Engine {
@@ -95,6 +96,10 @@ func Setup(
 			subs.GET("/:id/nodes", subH.GetNodes)
 			subs.GET("/:id/token", subH.GetToken)
 		}
+
+		// Export/Import
+		api.GET("/export", exportH.Export)
+		api.POST("/import", exportH.Import)
 
 		// Convert
 		api.POST("/convert", convertH.Convert)

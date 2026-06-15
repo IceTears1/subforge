@@ -31,6 +31,18 @@ func (s *UserService) List(createdBy *uint) ([]model.User, error) {
 	return users, err
 }
 
+func (s *UserService) ListPaged(page, pageSize int) ([]model.User, int64, error) {
+	var users []model.User
+	var total int64
+	q := s.db.Model(&model.User{})
+	q.Count(&total)
+	err := q.Order("id ASC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&users).Error
+	return users, total, err
+}
+
 func (s *UserService) Create(req CreateUserRequest, createdBy uint) (*model.User, error) {
 	var count int64
 	s.db.Model(&model.User{}).Where("username = ?", req.Username).Count(&count)
