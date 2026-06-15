@@ -21,11 +21,15 @@ import (
 )
 
 type SubscriptionService struct {
-	db *gorm.DB
+	db      *gorm.DB
+	webhook *WebhookService
 }
 
 func NewSubscriptionService(db *gorm.DB) *SubscriptionService {
-	return &SubscriptionService{db: db}
+	return &SubscriptionService{
+		db:      db,
+		webhook: NewWebhookService(db),
+	}
 }
 
 type CreateSubRequest struct {
@@ -140,6 +144,12 @@ func (s *SubscriptionService) refreshSub(sub *model.Subscription) error {
 	// Fetch content (SSRF-safe)
 	resp, err := httputil.SafeGet(sub.URL, 30*time.Second)
 	if err != nil {
+		s.webhook.Notify(sub.UserID, "fail", WebhookPayload{
+			Event:   "fail",
+			SubID:   sub.ID,
+			SubName: sub.Name,
+			Error:   err.Error(),
+		})
 		return fmt.Errorf("fetch failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -198,7 +208,19 @@ func (s *SubscriptionService) refreshSub(sub *model.Subscription) error {
 		return fmt.Errorf("update subscription failed: %w", err)
 	}
 
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+
+	// Send success webhook
+	s.webhook.Notify(sub.UserID, "refresh", WebhookPayload{
+		Event:     "refresh",
+		SubID:     sub.ID,
+		SubName:   sub.Name,
+		NodeCount: len(nodes),
+	})
+
+	return nil
 }
 
 // GetNodes returns nodes for a subscription.

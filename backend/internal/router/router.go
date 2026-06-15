@@ -19,6 +19,7 @@ func Setup(
 	publicH *handler.PublicHandler,
 	profileH *handler.ProfileHandler,
 	exportH *handler.ExportHandler,
+	webhookH *handler.WebhookHandler,
 	authSvc *service.AuthService,
 	cfg *config.Config,
 ) *gin.Engine {
@@ -100,6 +101,14 @@ func Setup(
 		// Export/Import
 		api.GET("/export", exportH.Export)
 		api.POST("/import", exportH.Import)
+
+		// Webhooks
+		webhooks := api.Group("/webhooks")
+		{
+			webhooks.GET("", webhookH.List)
+			webhooks.POST("", webhookH.Create)
+			webhooks.DELETE("/:id", webhookH.Delete)
+		}
 
 		// Convert
 		api.POST("/convert", convertH.Convert)

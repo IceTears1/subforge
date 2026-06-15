@@ -9,6 +9,13 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+var additionalModels []interface{}
+
+// RegisterModel registers additional models for auto-migration.
+func RegisterModel(model ...interface{}) {
+	additionalModels = append(additionalModels, model...)
+}
+
 func InitDB(cfg *config.Config) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -20,5 +27,7 @@ func InitDB(cfg *config.Config) (*gorm.DB, error) {
 }
 
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&User{}, &Subscription{}, &Node{})
+	models := []interface{}{&User{}, &Subscription{}, &Node{}}
+	models = append(models, additionalModels...)
+	return db.AutoMigrate(models...)
 }
