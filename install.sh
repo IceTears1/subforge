@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# ── Ensure we can read from the terminal even when piped (curl | bash) ──
-if [ ! -t 0 ] && [ -e /dev/tty ]; then
-    exec < /dev/tty
-fi
-
 set -e
 
 RED='\033[0;31m'
@@ -18,6 +13,18 @@ NC='\033[0m'
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
 CACHE_DIR="/opt/subforge-cache"
+
+# Detect if running interactively
+if [ -t 0 ]; then
+    INTERACTIVE=true
+else
+    INTERACTIVE=false
+    # Try to open tty for interactive prompts
+    if [ -e /dev/tty ]; then
+        exec < /dev/tty
+        INTERACTIVE=true
+    fi
+fi
 
 echo -e "${CYAN}${BOLD}"
 echo "  ____        _   _____                   "
@@ -82,7 +89,6 @@ detect_os() {
             PKG_UPDATE="pacman -Sy"
             ;;
         *)
-            # Try to detect from ID_LIKE
             case "$OS_LIKE" in
                 *debian*|*ubuntu*)
                     PKG_MANAGER="apt"
@@ -130,15 +136,21 @@ ask_input() {
     local prompt="$1"
     local default="$2"
     local result=""
-    read -p "$(echo -e "${CYAN}${prompt} [${default}]: ${NC}")" result
+
+    if [ "$INTERACTIVE" = true ]; then
+        read -p "$(echo -e "${CYAN}${prompt} [${default}]: ${NC}")" result
+    fi
     echo "${result:-$default}"
 }
 
 ask_secret() {
     local prompt="$1"
     local result=""
-    read -s -p "$(echo -e "${CYAN}${prompt}: ${NC}")" result
-    echo "" >&2
+
+    if [ "$INTERACTIVE" = true ]; then
+        read -s -p "$(echo -e "${CYAN}${prompt}: ${NC}")" result
+        echo "" >&2
+    fi
     echo "$result"
 }
 
@@ -146,19 +158,12 @@ ask_yes_no() {
     local prompt="$1"
     local default="$2"
     local choice="$default"
-    read -p "$(echo -e "${CYAN}${prompt} [${default}]: ${NC}")" choice
+
+    if [ "$INTERACTIVE" = true ]; then
+        read -p "$(echo -e "${CYAN}${prompt} [${default}]: ${NC}")" choice
+    fi
     choice=${choice:-$default}
     [[ "$choice" =~ ^[Yy]$ ]]
-}
-
-ensure_cmd() {
-    local cmd="$1"
-    local pkg="$2"
-    if ! command -v "$cmd" &>/dev/null; then
-        echo -e "  ${YELLOW}Installing ${pkg}...${NC}"
-        $PKG_UPDATE 2>/dev/null || true
-        $PKG_INSTALL "$pkg" 2>/dev/null || true
-    fi
 }
 
 # ─────────────────────────────────────
@@ -166,28 +171,15 @@ ensure_cmd() {
 # ─────────────────────────────────────
 clean_docker_cache() {
     echo -e "${YELLOW}  清理 Docker 缓存...${NC}"
-
-    # Remove stopped containers
     docker container prune -f 2>/dev/null || true
-
-    # Remove dangling images
     docker image prune -f 2>/dev/null || true
-
-    # Remove unused volumes (optional, keep data)
-    # docker volume prune -f 2>/dev/null || true
-
-    # Remove unused networks
     docker network prune -f 2>/dev/null || true
-
     echo -e "  ${GREEN}✓ Docker 缓存已清理${NC}"
 }
 
 clean_build_cache() {
     echo -e "${YELLOW}  清理构建缓存...${NC}"
-
-    # Remove build cache older than 7 days
     docker builder prune -f --filter "until=168h" 2>/dev/null || true
-
     echo -e "  ${GREEN}✓ 构建缓存已清理${NC}"
 }
 
@@ -197,12 +189,10 @@ optimize_docker_daemon() {
     DAEMON_JSON="/etc/docker/daemon.json"
     BACKUP_JSON="${DAEMON_JSON}.backup.$(date +%Y%m%d%H%M%S)"
 
-    # Backup existing config
     if [ -f "$DAEMON_JSON" ]; then
         cp "$DAEMON_JSON" "$BACKUP_JSON"
     fi
 
-    # Create optimized config
     cat > "$DAEMON_JSON" <<'EOF'
 {
   "log-driver": "json-file",
@@ -222,7 +212,6 @@ optimize_docker_daemon() {
 }
 EOF
 
-    # Restart Docker to apply changes
     if command -v systemctl &>/dev/null; then
         systemctl restart docker 2>/dev/null || true
     fi
@@ -232,17 +221,10 @@ EOF
 
 setup_build_cache() {
     echo -e "${YELLOW}  配置构建缓存...${NC}"
-
-    # Create cache directory
     mkdir -p "$CACHE_DIR"
-
-    # Create BuildKit cache directory
     mkdir -p /var/lib/buildkit/cache
-
-    # Enable BuildKit
     export DOCKER_BUILDKIT=1
     export BUILDKIT_STEP_LOG_MAX_SIZE=-1
-
     echo -e "  ${GREEN}✓ 构建缓存已配置${NC}"
 }
 
@@ -352,11 +334,9 @@ if command -v docker &>/dev/null; then
 else
     echo -e "  ${YELLOW}安装 Docker...${NC}"
 
-    # Try official install script first (works on most systems)
     if curl -fsSL https://get.docker.com | bash 2>/dev/null; then
         echo -e "  ${GREEN}✓ Docker 已安装${NC}"
     else
-        # Fallback: install via package manager
         echo -e "  ${YELLOW}尝试通过包管理器安装...${NC}"
         case "$PKG_MANAGER" in
             apt)
@@ -380,7 +360,6 @@ else
         esac
     fi
 
-    # Enable and start Docker
     if command -v systemctl &>/dev/null; then
         systemctl enable docker 2>/dev/null || true
         systemctl start docker 2>/dev/null || true
@@ -403,13 +382,11 @@ else
     COMPOSE_DIR="/usr/local/lib/docker/cli-plugins"
     mkdir -p "$COMPOSE_DIR"
 
-    # Try downloading from GitHub
     COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}"
     if curl -SL --connect-timeout 15 --retry 3 "$COMPOSE_URL" \
         -o "$COMPOSE_DIR/docker-compose" 2>/dev/null; then
         chmod +x "$COMPOSE_DIR/docker-compose"
     else
-        # Fallback: install via package manager
         echo -e "  ${YELLOW}GitHub 下载失败，尝试包管理器...${NC}"
         case "$PKG_MANAGER" in
             apt)
@@ -452,7 +429,6 @@ echo -e "  ${GREEN}✓ Docker 已优化${NC}"
 echo -e "${GREEN}[4/6] 下载代码...${NC}"
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd "$INSTALL_DIR"
-    # Save current commit for potential rollback
     OLD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     git fetch origin main
     git reset --hard origin/main
@@ -488,19 +464,15 @@ echo -e "  ${GREEN}✓ .env 已生成${NC}"
 # ─────────────────────────────────────
 echo -e "${GREEN}[6/6] 启动服务...${NC}"
 
-# Stop old services
 docker compose down --remove-orphans 2>/dev/null || true
 
-# Build with cache optimization
 echo -e "  ${DIM}构建 Docker 镜像（使用缓存）...${NC}"
 docker compose build --parallel 2>&1 | tail -5
 
-# Start services
 docker compose up -d
 
 echo -e "  ${YELLOW}等待服务就绪...${NC}"
 
-# Wait for health check instead of blind sleep
 WAIT_COUNT=0
 WAIT_MAX=60
 while [ $WAIT_COUNT -lt $WAIT_MAX ]; do
@@ -509,7 +481,6 @@ while [ $WAIT_COUNT -lt $WAIT_MAX ]; do
     fi
     sleep 2
     WAIT_COUNT=$((WAIT_COUNT + 1))
-    # Show progress every 10 seconds
     if [ $((WAIT_COUNT % 5)) -eq 0 ]; then
         echo -e "  ${DIM}等待中... ($((WAIT_COUNT * 2))s)${NC}"
     fi
@@ -534,7 +505,6 @@ elif command -v firewall-cmd &>/dev/null; then
     echo -e "  ${GREEN}✓ firewalld: 端口 ${PORT} 已开放${NC}"
 elif command -v iptables &>/dev/null; then
     iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || true
-    # Try to persist iptables rules
     if command -v iptables-save &>/dev/null; then
         iptables-save > /etc/iptables.rules 2>/dev/null || true
     fi
@@ -553,7 +523,7 @@ if command -v docker &>/dev/null; then
     echo -e "  ${DIM}镜像大小: ${IMAGE_SIZE}${NC}"
 fi
 
-# Get public IP (try multiple services)
+# Get public IP
 PUBLIC_IP=""
 for ip_service in "ifconfig.me" "ipinfo.io/ip" "icanhazip.com" "api.ipify.org"; do
     PUBLIC_IP=$(curl -s --connect-timeout 5 "https://${ip_service}" 2>/dev/null)
