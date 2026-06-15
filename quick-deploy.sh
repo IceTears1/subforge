@@ -8,7 +8,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 INSTALL_DIR="/opt/subforge"
-GO_VERSION="1.22.4"
+GO_VERSION="1.25.0"
 NODE_VERSION="20"
 
 echo -e "${CYAN}SubForge Quick Deploy (Debian/Ubuntu)${NC}"

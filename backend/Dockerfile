@@ -1,14 +1,13 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Use Chinese Go proxy for faster downloads
 ENV GOPROXY=https://goproxy.cn,direct
 ENV GO111MODULE=on
 
 WORKDIR /app
-COPY go.mod ./
-RUN go mod download || true
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -o /subforge ./cmd/server
 
 FROM alpine:3.19
