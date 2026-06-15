@@ -1,4 +1,4 @@
-.PHONY: build up down logs clean deploy deploy-vps update-vps
+.PHONY: build up down logs clean deploy deploy-vps update-vps update rollback
 
 # Local deploy
 deploy:
@@ -55,3 +55,11 @@ metrics:
 # Deploy verification
 verify:
 	chmod +x scripts/deploy-verify.sh && ./scripts/deploy-verify.sh
+
+# Update (safe with backup)
+update:
+	chmod +x scripts/update.sh && sudo bash scripts/update.sh
+
+# Rollback to previous version
+rollback:
+	chmod +x scripts/rollback.sh && sudo bash scripts/rollback.sh
