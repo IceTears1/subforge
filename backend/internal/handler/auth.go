@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"strings"
+	"time"
+
 	"subforge/internal/pkg/response"
 	"subforge/internal/service"
 
@@ -33,4 +36,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	h.audit.Log(result.User.ID, result.User.Username, "login", "auth", "login success", ip, true)
 	response.OK(c, result)
+}
+
+// Logout revokes the current token.
+func (h *AuthHandler) Logout(c *gin.Context) {
+	token := c.GetString("token")
+	if token != "" {
+		// Revoke token (add to blacklist with 24h expiry)
+		service.TokenBlacklistInstance.Revoke(token, time.Now().Add(24*time.Hour))
+	}
+
+	userID := getUserID(c)
+	ip := c.ClientIP()
+	h.audit.Log(userID, "", "logout", "auth", "logout", ip, true)
+
+	response.OK(c, gin.H{"message": "logged out"})
 }

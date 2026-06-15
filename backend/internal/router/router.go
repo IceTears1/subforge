@@ -1,6 +1,7 @@
 package router
 
 import (
+	"strings"
 	"time"
 
 	"subforge/internal/config"
@@ -32,16 +33,29 @@ func Setup(
 	// Request body size limit (1MB)
 	r.MaxMultipartMemory = 1 << 20
 
-	// CORS - configurable origin
+	// CORS - strict origin validation
+	allowedOrigins := parseAllowedOrigins(cfg.CORSOrigins)
 	r.Use(func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if origin == "" {
-			origin = "*"
+		allowed := false
+		if origin != "" {
+			for _, o := range allowedOrigins {
+				if origin == o {
+					allowed = true
+					break
+				}
+			}
 		}
-		c.Header("Access-Control-Allow-Origin", origin)
+		if allowed {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Credentials", "true")
+		} else if len(allowedOrigins) == 0 {
+			// No origins configured = no CORS (same-origin only)
+			c.Header("Access-Control-Allow-Origin", "")
+		}
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Max-Age", "86400")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -80,6 +94,9 @@ func Setup(
 	api.Use(authMW)
 	api.Use(ipWhitelist)
 	{
+		// Auth
+		api.POST("/auth/logout", authH.Logout)
+
 		// Profile (any user)
 		api.GET("/me", profileH.GetMe)
 		api.PUT("/me/password", profileH.ChangePassword)
@@ -137,4 +154,18 @@ func Setup(
 	}
 
 	return r
+}
+
+func parseAllowedOrigins(origins string) []string {
+	if origins == "" {
+		return nil
+	}
+	var result []string
+	for _, o := range strings.Split(origins, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			result = append(result, o)
+		}
+	}
+	return result
 }

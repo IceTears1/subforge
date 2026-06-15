@@ -18,6 +18,14 @@ func AuthMiddleware(authSvc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 		token := strings.TrimPrefix(auth, "Bearer ")
+
+		// Check blacklist
+		if service.TokenBlacklistInstance.IsRevoked(token) {
+			response.Unauthorized(c)
+			c.Abort()
+			return
+		}
+
 		claims, err := authSvc.ValidateToken(token)
 		if err != nil {
 			response.Unauthorized(c)
@@ -26,6 +34,7 @@ func AuthMiddleware(authSvc *service.AuthService) gin.HandlerFunc {
 		}
 		c.Set("user_id", claims.UserID)
 		c.Set("role", claims.Role)
+		c.Set("token", token)
 		c.Next()
 	}
 }

@@ -12,11 +12,13 @@ type Config struct {
 	DBName            string
 	DBUser            string
 	DBPassword        string
+	DBSSLMode         string
 	JWTSecret         string
 	JWTExpiry         string
 	AdminPassword     string
 	GinMode           string
 	AdminIPWhitelist  string // comma-separated IPs, empty = no restriction
+	CORSOrigins       string // comma-separated allowed origins, empty = same-origin only
 }
 
 func Load() *Config {
@@ -32,6 +34,8 @@ func Load() *Config {
 		AdminPassword:    getEnv("ADMIN_PASSWORD", "admin123"),
 		GinMode:          getEnv("GIN_MODE", "debug"),
 		AdminIPWhitelist: getEnv("ADMIN_IP_WHITELIST", ""),
+		DBSSLMode:        getEnv("DB_SSL_MODE", "disable"),
+		CORSOrigins:      getEnv("CORS_ORIGINS", ""),
 	}
 	cfg.validate()
 	return cfg

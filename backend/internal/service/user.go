@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"unicode"
 	"subforge/internal/model"
 	pkgcrypto "subforge/internal/pkg/crypto"
 
@@ -18,7 +19,32 @@ func NewUserService(db *gorm.DB) *UserService {
 
 type CreateUserRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=64"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required,min=8"`
+}
+
+// ValidatePassword checks password complexity.
+func ValidatePassword(password string) error {
+	if len(password) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	if len(password) > 128 {
+		return errors.New("password must be at most 128 characters")
+	}
+	var hasUpper, hasLower, hasDigit bool
+	for _, c := range password {
+		switch {
+		case unicode.IsUpper(c):
+			hasUpper = true
+		case unicode.IsLower(c):
+			hasLower = true
+		case unicode.IsDigit(c):
+			hasDigit = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit {
+		return errors.New("password must contain uppercase, lowercase, and digit")
+	}
+	return nil
 }
 
 func (s *UserService) List(createdBy *uint) ([]model.User, error) {
@@ -44,6 +70,9 @@ func (s *UserService) ListPaged(page, pageSize int) ([]model.User, int64, error)
 }
 
 func (s *UserService) Create(req CreateUserRequest, createdBy uint) (*model.User, error) {
+	if err := ValidatePassword(req.Password); err != nil {
+		return nil, err
+	}
 	var count int64
 	s.db.Model(&model.User{}).Where("username = ?", req.Username).Count(&count)
 	if count > 0 {
@@ -71,6 +100,9 @@ func (s *UserService) UpdateStatus(id uint, status int8) error {
 }
 
 func (s *UserService) ResetPassword(id uint, newPassword string) error {
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
+	}
 	hash, err := pkgcrypto.HashPassword(newPassword)
 	if err != nil {
 		return err
