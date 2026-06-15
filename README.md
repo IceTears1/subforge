@@ -250,11 +250,9 @@ curl http://localhost:8080/api/metrics
 
 ## 🛡️ 安全特性
 
-- **SSRF 防护** — 阻止访问内网地址
 - **JWT 认证** — 安全的 Token 验证
 - **密码加密** — bcrypt 哈希存储
 - **API 限流** — 防止暴力破解
-- **IP 白名单** — 可选的管理员 IP 限制
 - **安全头** — CSP、XSS 防护等
 
 ## 📊 支持协议
@@ -275,16 +273,10 @@ curl http://localhost:8080/api/metrics
 
 ```
 subforge/
-├── backend/              # Go 后端
-│   ├── cmd/server/       # 入口
-│   ├── internal/
-│   │   ├── parser/       # 解析器（可扩展）
-│   │   ├── renderer/     # 渲染器（可扩展）
-│   │   ├── smart/        # 智能引擎
-│   │   ├── service/      # 业务逻辑
-│   │   ├── handler/      # HTTP 处理
-│   │   └── model/        # 数据模型
-│   └── migrations/       # 数据库初始化
+├── backend-python/       # Python 后端 (FastAPI)
+│   ├── app.py            # 主应用
+│   ├── requirements.txt  # Python 依赖
+│   └── Dockerfile        # Docker 镜像
 ├── frontend/             # Vue3 前端
 │   └── src/
 │       ├── views/        # 页面组件
@@ -310,8 +302,9 @@ subforge/
 docker compose up -d postgres
 
 # 后端开发
-cd backend
-go run ./cmd/server
+cd backend-python
+pip install -r requirements.txt
+python app.py
 
 # 前端开发
 cd frontend
@@ -321,17 +314,12 @@ npm run dev
 
 ### 添加新协议
 
-1. 在 `backend/internal/parser/` 创建新的解析器
-2. 在 `backend/internal/renderer/` 创建新的渲染器
-3. 在 `router.go` 中注册路由
+1. 在 `backend-python/app.py` 中添加新的转换函数
+2. 在 `/api/convert` 端点中调用新函数
 
 ### 运行测试
 
 ```bash
-# 后端测试
-cd backend
-go test ./...
-
 # 前端构建检查
 cd frontend
 npm run build
@@ -365,5 +353,5 @@ MIT License
 
 - [Clash](https://github.com/Dreamacro/clash)
 - [sing-box](https://github.com/SagerNet/sing-box)
-- [Gin](https://github.com/gin-gonic/gin)
+- [FastAPI](https://fastapi.tiangolo.com/)
 - [Naive UI](https://www.naiveui.com/)

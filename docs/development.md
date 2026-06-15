@@ -25,7 +25,7 @@
 ├─────────────────────────────────────────────────────────┤
 │                      Frontend (Vue3)                     │
 ├─────────────────────────────────────────────────────────┤
-│                      Backend (Go/Gin)                    │
+│                    Backend (Python/FastAPI)              │
 ├─────────────────────────────────────────────────────────┤
 │                      PostgreSQL                         │
 └─────────────────────────────────────────────────────────┘
@@ -59,12 +59,12 @@ Database (PostgreSQL)
 
 | 技术 | 版本 | 用途 |
 |------|------|------|
-| Go | 1.22+ | 主语言 |
-| Gin | 1.9+ | Web 框架 |
-| GORM | 1.25+ | ORM |
+| Python | 3.11+ | 主语言 |
+| FastAPI | 0.109+ | Web 框架 |
+| SQLAlchemy | 2.0+ | ORM |
 | PostgreSQL | 15 | 数据库 |
-| JWT | 5.2+ | 认证 |
-| bcrypt | - | 密码加密 |
+| python-jose | 3.3+ | JWT 认证 |
+| passlib | 1.7+ | 密码加密 |
 
 ### 前端
 
@@ -93,7 +93,7 @@ Database (PostgreSQL)
 
 ### 前置要求
 
-- Go 1.22+
+- Python 3.11+
 - Node.js 20+
 - PostgreSQL 15+
 - Docker (可选)
@@ -103,10 +103,10 @@ Database (PostgreSQL)
 ```bash
 # 克隆项目
 git clone https://github.com/IceTears1/subforge.git
-cd subforge/backend
+cd subforge/backend-python
 
 # 安装依赖
-go mod tidy
+pip install -r requirements.txt
 
 # 配置环境变量
 cp ../.env.example .env
@@ -122,7 +122,7 @@ docker run -d \
   postgres:15-alpine
 
 # 运行后端
-go run ./cmd/server
+python app.py
 ```
 
 ### 前端开发
@@ -145,7 +145,7 @@ npm run dev
 docker compose up -d postgres
 
 # 终端 1: 后端
-cd backend && go run ./cmd/server
+cd backend-python && python app.py
 
 # 终端 2: 前端
 cd frontend && npm run dev
@@ -157,46 +157,25 @@ cd frontend && npm run dev
 
 ```
 subforge/
-├── backend/                    # Go 后端
-│   ├── cmd/
-│   │   └── server/
-│   │       └── main.go         # 入口文件
-│   ├── internal/
-│   │   ├── config/             # 配置加载
-│   │   │   └── config.go
-│   │   ├── core/               # 核心类型
-│   │   │   └── types.go        # 统一节点结构 (UPN)
-│   │   ├── model/              # 数据模型
-│   │   │   ├── database.go     # 数据库连接
-│   │   │   ├── user.go         # 用户模型
-│   │   │   ├── subscription.go # 订阅模型
-│   │   │   ├── node.go         # 节点模型
-│   │   │   └── apikey.go       # API Key 模型
-│   │   ├── parser/             # 输入解析器
-│   │   │   ├── parser.go       # 解析器接口
-│   │   │   ├── base64.go       # Base64 解析
-│   │   │   ├── uri.go          # URI 解析
-│   │   │   ├── clash.go        # Clash YAML 解析
-│   │   │   └── singbox.go      # sing-box JSON 解析
-│   │   ├── renderer/           # 输出渲染器
-│   │   │   ├── renderer.go     # 渲染器接口
-│   │   │   ├── clash.go        # Clash 渲染
-│   │   │   ├── singbox.go      # sing-box 渲染
-│   │   │   ├── surge.go        # Surge 渲染
-│   │   │   ├── loon.go         # Loon 渲染
-│   │   │   ├── quanx.go        # QX 渲染
-│   │   │   └── base64.go       # Base64 渲染
-│   │   ├── smart/              # 智能引擎
-│   │   │   ├── rename.go       # 区域重命名
-│   │   │   ├── dedup.go        # 去重
-│   │   │   └── filter.go       # 筛选
-│   │   ├── service/            # 业务逻辑
-│   │   │   ├── auth.go         # 认证服务
-│   │   │   ├── user.go         # 用户服务
-│   │   │   ├── subscription.go # 订阅服务
-│   │   │   ├── convert.go      # 转换服务
-│   │   │   ├── health.go       # 健康检查
-│   │   │   ├── audit.go        # 审计日志
+├── backend-python/            # Python 后端
+│   ├── app.py                 # 主应用 (FastAPI)
+│   ├── requirements.txt       # Python 依赖
+│   └── Dockerfile             # Docker 镜像
+├── frontend/                  # Vue3 前端
+│   └── src/
+│       ├── views/             # 页面组件
+│       ├── components/        # 公共组件
+│       ├── api/               # API 封装
+│       └── stores/            # Pinia 状态管理
+├── nginx/                     # Nginx 配置
+├── scripts/                   # 运维脚本
+├── docs/                      # 项目文档
+├── docker-compose.yml         # Docker 编排
+├── install.sh                 # 一键安装脚本
+├── deploy.sh                  # 本地部署脚本
+├── setup-ssl.sh               # SSL 配置脚本
+└── .env.example               # 配置模板
+```
 │   │   │   ├── webhook.go      # Webhook
 │   │   │   ├── apikey.go       # API Key
 │   │   │   ├── token.go        # Token 黑名单
