@@ -5,9 +5,10 @@ ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct
 ENV GO111MODULE=on
 
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
+COPY go.mod ./
+RUN go mod download || true
 COPY . .
+RUN go mod tidy 2>/dev/null || true
 RUN CGO_ENABLED=0 GOOS=linux go build -o /subforge ./cmd/server
 
 FROM alpine:3.19
