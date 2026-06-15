@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"strconv"
 	"subforge/internal/pkg/response"
 	"subforge/internal/service"
@@ -9,11 +10,12 @@ import (
 )
 
 type UserHandler struct {
-	svc *service.UserService
+	svc   *service.UserService
+	audit *service.AuditService
 }
 
-func NewUserHandler(svc *service.UserService) *UserHandler {
-	return &UserHandler{svc: svc}
+func NewUserHandler(svc *service.UserService, audit *service.AuditService) *UserHandler {
+	return &UserHandler{svc: svc, audit: audit}
 }
 
 func (h *UserHandler) List(c *gin.Context) {
@@ -47,6 +49,8 @@ func (h *UserHandler) Create(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+
+	h.audit.Log(createdBy, "", "create", "user", fmt.Sprintf("created user: %s", req.Username), c.ClientIP(), true)
 	response.Created(c, user)
 }
 
@@ -67,6 +71,11 @@ func (h *UserHandler) UpdateStatus(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+
+	adminID := getUserID(c)
+	action := "enable"
+	if req.Status == 0 { action = "disable" }
+	h.audit.Log(adminID, "", action, "user", fmt.Sprintf("%s user #%d", action, id), c.ClientIP(), true)
 	response.OK(c, nil)
 }
 
@@ -77,7 +86,7 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Password string `json:"password" binding:"required,min=6"`
+		Password string `json:"password" binding:"required,min=8"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "invalid request")
@@ -87,6 +96,9 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+
+	adminID := getUserID(c)
+	h.audit.Log(adminID, "", "reset_password", "user", fmt.Sprintf("reset password for user #%d", id), c.ClientIP(), true)
 	response.OK(c, nil)
 }
 
@@ -100,5 +112,8 @@ func (h *UserHandler) Delete(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+
+	adminID := getUserID(c)
+	h.audit.Log(adminID, "", "delete", "user", fmt.Sprintf("deleted user #%d", id), c.ClientIP(), true)
 	response.OK(c, nil)
 }

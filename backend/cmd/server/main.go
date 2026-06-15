@@ -49,8 +49,8 @@ func main() {
 
 	// Init handlers
 	authH := handler.NewAuthHandler(authSvc, auditSvc)
-	userH := handler.NewUserHandler(userSvc)
-	subH := handler.NewSubscriptionHandler(subSvc)
+	userH := handler.NewUserHandler(userSvc, auditSvc)
+	subH := handler.NewSubscriptionHandler(subSvc, auditSvc)
 	convertH := handler.NewConvertHandler(convertSvc)
 	publicH := handler.NewPublicHandler(subSvc)
 	profileH := handler.NewProfileHandler(userSvc)
@@ -61,9 +61,11 @@ func main() {
 	healthH := handler.NewHealthHandler(healthSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
 	metricsH := handler.NewMetricsHandler(db)
+	apiKeySvc := service.NewAPIKeyService(db)
+	apiKeyH := handler.NewAPIKeyHandler(apiKeySvc)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, apiKeyH, apiKeySvc, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{

@@ -25,6 +25,8 @@ func Setup(
 	healthH *handler.HealthHandler,
 	auditH *handler.AuditHandler,
 	metricsH *handler.MetricsHandler,
+	apiKeyH *handler.APIKeyHandler,
+	apiKeySvc *service.APIKeyService,
 	authSvc *service.AuthService,
 	cfg *config.Config,
 ) *gin.Engine {
@@ -85,7 +87,7 @@ func Setup(
 	_ = loginLimiter // keep reference
 
 	// Auth middleware
-	authMW := handler.AuthMiddleware(authSvc)
+	authMW := handler.AuthMiddleware(authSvc, apiKeySvc)
 	adminRequired := handler.AdminRequired()
 	ipWhitelist := handler.IPWhitelistMiddleware(cfg)
 
@@ -100,6 +102,14 @@ func Setup(
 		// Profile (any user)
 		api.GET("/me", profileH.GetMe)
 		api.PUT("/me/password", profileH.ChangePassword)
+
+		// API Keys (any user)
+		apikeys := api.Group("/apikeys")
+		{
+			apikeys.GET("", apiKeyH.List)
+			apikeys.POST("", apiKeyH.Create)
+			apikeys.DELETE("/:id", apiKeyH.Delete)
+		}
 
 		// Users (admin only)
 		users := api.Group("/users")

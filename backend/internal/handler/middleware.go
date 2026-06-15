@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func AuthMiddleware(authSvc *service.AuthService) gin.HandlerFunc {
+func AuthMiddleware(authSvc *service.AuthService, apiKeySvc *service.APIKeyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		if auth == "" {
@@ -17,9 +17,25 @@ func AuthMiddleware(authSvc *service.AuthService) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
 		token := strings.TrimPrefix(auth, "Bearer ")
 
-		// Check blacklist
+		// Try API key first (starts with sf_)
+		if strings.HasPrefix(token, "sf_") {
+			apiKey, err := apiKeySvc.Validate(token)
+			if err != nil {
+				response.Unauthorized(c)
+				c.Abort()
+				return
+			}
+			c.Set("user_id", apiKey.UserID)
+			c.Set("role", "user") // API keys are user-level
+			c.Set("api_key_id", apiKey.ID)
+			c.Next()
+			return
+		}
+
+		// JWT token
 		if service.TokenBlacklistInstance.IsRevoked(token) {
 			response.Unauthorized(c)
 			c.Abort()

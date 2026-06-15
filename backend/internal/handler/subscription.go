@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"strconv"
 	"subforge/internal/pkg/response"
 	"subforge/internal/service"
@@ -9,11 +10,12 @@ import (
 )
 
 type SubscriptionHandler struct {
-	svc *service.SubscriptionService
+	svc   *service.SubscriptionService
+	audit *service.AuditService
 }
 
-func NewSubscriptionHandler(svc *service.SubscriptionService) *SubscriptionHandler {
-	return &SubscriptionHandler{svc: svc}
+func NewSubscriptionHandler(svc *service.SubscriptionService, audit *service.AuditService) *SubscriptionHandler {
+	return &SubscriptionHandler{svc: svc, audit: audit}
 }
 
 func (h *SubscriptionHandler) List(c *gin.Context) {
@@ -59,6 +61,8 @@ func (h *SubscriptionHandler) Create(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+
+	h.audit.Log(userID, "", "create", "subscription", fmt.Sprintf("created: %s", req.Name), c.ClientIP(), true)
 	response.Created(c, sub)
 }
 
@@ -74,6 +78,8 @@ func (h *SubscriptionHandler) Update(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+
+	h.audit.Log(userID, "", "update", "subscription", fmt.Sprintf("updated #%d: %s", id, req.Name), c.ClientIP(), true)
 	response.OK(c, nil)
 }
 
@@ -84,6 +90,8 @@ func (h *SubscriptionHandler) Delete(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
+
+	h.audit.Log(userID, "", "delete", "subscription", fmt.Sprintf("deleted #%d", id), c.ClientIP(), true)
 	response.OK(c, nil)
 }
 
@@ -91,9 +99,12 @@ func (h *SubscriptionHandler) Refresh(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	userID := getUserID(c)
 	if err := h.svc.Refresh(uint(id), userID); err != nil {
+		h.audit.Log(userID, "", "refresh", "subscription", fmt.Sprintf("refresh #%d failed: %v", id, err), c.ClientIP(), false)
 		response.InternalError(c, "refresh failed: "+err.Error())
 		return
 	}
+
+	h.audit.Log(userID, "", "refresh", "subscription", fmt.Sprintf("refreshed #%d", id), c.ClientIP(), true)
 	response.OK(c, gin.H{"message": "refreshed"})
 }
 
