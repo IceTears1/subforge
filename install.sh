@@ -1,10 +1,9 @@
 #!/bin/bash
-# SubForge One-Click Installer
+# SubForge One-Click Installer (Fast Version)
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 
 set -euo pipefail
 
-# ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,7 +12,6 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-# ─── Config ───────────────────────────────────────────────────────────────────
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
 PORT=8080
@@ -21,7 +19,6 @@ ADMIN_PASSWORD=""
 DB_PASSWORD=""
 JWT_SECRET=""
 
-# ─── Functions ────────────────────────────────────────────────────────────────
 log()   { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
@@ -37,102 +34,60 @@ check_root() {
     fi
 }
 
-check_os() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID="${ID:-unknown}"
-        OS_LIKE="${ID_LIKE:-$OS_ID}"
-    else
-        OS_ID="unknown"
-        OS_LIKE="unknown"
-    fi
-
+detect_arch() {
     ARCH=$(uname -m)
     case "$ARCH" in
-        x86_64|amd64)  ARCH="amd64" ;;
-        aarch64|arm64) ARCH="arm64" ;;
-        armv7l)        ARCH="armv7" ;;
+        x86_64|amd64)  GOARCH="amd64" ;;
+        aarch64|arm64) GOARCH="arm64" ;;
+        armv7l)        GOARCH="arm" ;;
+        *)             GOARCH="amd64" ;;
     esac
-
-    info "系统: $OS_ID ($ARCH)"
+    info "架构: $ARCH → $GOARCH"
 }
 
 install_docker() {
     info "检查 Docker..."
-
     if command -v docker &>/dev/null; then
-        log "Docker 已安装: $(docker --version | head -1)"
+        log "Docker 已安装"
         return
     fi
-
-    warn "正在安装 Docker..."
-
-    if curl -fsSL https://get.docker.com | bash 2>/dev/null; then
-        log "Docker 安装完成"
-    else
-        error "无法安装 Docker，请手动安装: https://docs.docker.com/engine/install/"
-    fi
-
-    if command -v systemctl &>/dev/null; then
-        systemctl enable docker 2>/dev/null || true
-        systemctl start docker 2>/dev/null || true
-    fi
+    warn "安装 Docker..."
+    curl -fsSL https://get.docker.com | bash 2>/dev/null || error "Docker 安装失败"
+    systemctl enable docker 2>/dev/null || true
+    systemctl start docker 2>/dev/null || true
+    log "Docker 安装完成"
 }
 
 install_compose() {
     info "检查 Docker Compose..."
-
     if docker compose version &>/dev/null; then
         log "Docker Compose 已安装"
         return
     fi
+    warn "安装 Docker Compose..."
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${GOARCH}" \
+        -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    log "Docker Compose 安装完成"
+}
 
-    warn "正在安装 Docker Compose..."
-
-    COMPOSE_DIR="/usr/local/lib/docker/cli-plugins"
-    mkdir -p "$COMPOSE_DIR"
-
-    COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}"
-    if curl -fsSL --connect-timeout 15 --retry 3 "$COMPOSE_URL" -o "$COMPOSE_DIR/docker-compose" 2>/dev/null; then
-        chmod +x "$COMPOSE_DIR/docker-compose"
-        log "Docker Compose 安装完成"
-    else
-        error "无法安装 Docker Compose"
+install_go() {
+    info "检查 Go..."
+    if command -v go &>/dev/null; then
+        log "Go 已安装: $(go version | awk '{print $3}')"
+        return
     fi
-}
-
-optimize_docker() {
-    info "优化 Docker 配置..."
-
-    DAEMON_JSON="/etc/docker/daemon.json"
-    if [ -f "$DAEMON_JSON" ]; then
-        cp "$DAEMON_JSON" "${DAEMON_JSON}.bak.$(date +%s)"
-    fi
-
-    cat > "$DAEMON_JSON" <<'EOF'
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" },
-  "storage-driver": "overlay2",
-  "live-restore": true
-}
-EOF
-
-    command -v systemctl &>/dev/null && systemctl restart docker 2>/dev/null || true
-    log "Docker 优化完成"
-}
-
-clean_cache() {
-    info "清理缓存..."
-    docker container prune -f 2>/dev/null || true
-    docker image prune -f 2>/dev/null || true
-    docker network prune -f 2>/dev/null || true
-    log "缓存清理完成"
+    warn "安装 Go..."
+    GO_VERSION="1.23.0"
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" | tar -C /usr/local -xzf -
+    export PATH=$PATH:/usr/local/go/bin
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+    log "Go 安装完成"
 }
 
 clone_repo() {
     info "下载代码..."
-
     if [ -d "$INSTALL_DIR/.git" ]; then
         cd "$INSTALL_DIR"
         OLD=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -148,8 +103,39 @@ clone_repo() {
     fi
 }
 
+build_backend() {
+    info "编译后端..."
+    cd "$INSTALL_DIR/backend"
+
+    # Use Docker to build (no need to install Go locally)
+    docker run --rm \
+        -v "$(pwd):/app" \
+        -w /app \
+        -e GOPROXY=https://goproxy.cn,direct \
+        golang:1.23-alpine \
+        sh -c "go mod tidy && CGO_ENABLED=0 GOOS=linux GOARCH=${GOARCH} go build -ldflags='-s -w' -o /app/subforge ./cmd/server"
+
+    chmod +x subforge
+    log "后端编译完成"
+}
+
+build_frontend() {
+    info "编译前端..."
+    cd "$INSTALL_DIR/frontend"
+
+    # Use Docker to build
+    docker run --rm \
+        -v "$(pwd):/app" \
+        -w /app \
+        node:20-alpine \
+        sh -c "npm config set registry https://registry.npmmirror.com && npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps && npm run build"
+
+    log "前端编译完成"
+}
+
 generate_config() {
     info "生成配置..."
+    cd "$INSTALL_DIR"
 
     [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(gen_pass 24)
     [ -z "$JWT_SECRET" ] && JWT_SECRET=$(gen_pass 32)
@@ -174,15 +160,19 @@ EOF
 
 start_services() {
     info "启动服务..."
-
     cd "$INSTALL_DIR"
-    docker compose down --remove-orphans 2>/dev/null || true
 
-    # Build images (this takes time on first run)
-    info "构建 Docker 镜像（首次较慢）..."
-    docker compose build --parallel 2>&1 | tail -10 || docker compose build
+    # Start only PostgreSQL and Nginx via Docker
+    docker compose up -d postgres nginx
 
-    docker compose up -d
+    # Wait for PostgreSQL
+    info "等待数据库就绪..."
+    sleep 5
+
+    # Start backend directly
+    info "启动后端服务..."
+    pkill -f "./subforge" 2>/dev/null || true
+    nohup ./subforge > /var/log/subforge.log 2>&1 &
 
     log "服务已启动"
 }
@@ -190,7 +180,7 @@ start_services() {
 wait_health() {
     info "等待服务就绪..."
 
-    local max=90
+    local max=30
     local count=0
 
     while [ $count -lt $max ]; do
@@ -200,10 +190,9 @@ wait_health() {
         fi
         sleep 2
         count=$((count + 2))
-        [ $((count % 10)) -eq 0 ] && info "等待中... ${count}s"
     done
 
-    warn "服务启动较慢，请检查日志: docker compose logs"
+    warn "服务启动较慢，请检查日志: tail -f /var/log/subforge.log"
 }
 
 get_public_ip() {
@@ -218,7 +207,6 @@ get_public_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
 }
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
     echo ""
     echo -e "${CYAN}${BOLD}"
@@ -228,30 +216,30 @@ main() {
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本${NC}"
+    echo -e "  ${BOLD}一键安装脚本 (快速版)${NC}"
     echo ""
 
     check_root
-    check_os
-
-    # Clean cache
-    clean_cache
+    detect_arch
 
     # Install dependencies
     install_docker
     install_compose
-    optimize_docker
 
     # Setup project
     clone_repo
     generate_config
+
+    # Build (using Docker for compilation only)
+    build_backend
+    build_frontend
+
+    # Start services
     start_services
     wait_health
 
-    # Get IP
     PUBLIC_IP=$(get_public_ip)
 
-    # Done
     echo ""
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
     echo -e "${GREEN}${BOLD}  ✅ 安装成功!${NC}"
@@ -261,9 +249,8 @@ main() {
     echo -e "  用户名:   ${CYAN}admin${NC}"
     echo -e "  密码:     ${CYAN}${ADMIN_PASSWORD}${NC}"
     echo ""
-    echo -e "  ${DIM}查看日志: cd ${INSTALL_DIR} && docker compose logs -f${NC}"
-    echo -e "  ${DIM}重启服务: cd ${INSTALL_DIR} && docker compose restart${NC}"
-    echo -e "  ${DIM}更新版本: cd ${INSTALL_DIR} && git pull && docker compose up -d --build${NC}"
+    echo -e "  ${DIM}查看日志: tail -f /var/log/subforge.log${NC}"
+    echo -e "  ${DIM}重启后端: cd ${INSTALL_DIR} && ./subforge${NC}"
     echo ""
 }
 
