@@ -68,9 +68,11 @@ func main() {
 	schedulerH := handler.NewSchedulerHandler(scheduler)
 	backupSvc := service.NewBackupService(db)
 	backupH := handler.NewBackupHandler(backupSvc, auditSvc)
+	favSvc := service.NewFavoriteService(db)
+	favH := handler.NewFavoriteHandler(favSvc)
 
 	// Setup router
-	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, apiKeyH, updateH, schedulerH, backupH, apiKeySvc, authSvc, cfg)
+	r := router.Setup(authH, userH, subH, convertH, publicH, profileH, exportH, webhookH, batchH, healthH, auditH, metricsH, apiKeyH, updateH, schedulerH, backupH, favH, apiKeySvc, authSvc, cfg)
 
 	// Graceful shutdown
 	srv := &http.Server{

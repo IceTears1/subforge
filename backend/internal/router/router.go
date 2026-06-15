@@ -29,6 +29,7 @@ func Setup(
 	updateH *handler.UpdateHandler,
 	schedulerH *handler.SchedulerHandler,
 	backupH *handler.BackupHandler,
+	favH *handler.FavoriteHandler,
 	apiKeySvc *service.APIKeyService,
 	authSvc *service.AuthService,
 	cfg *config.Config,
@@ -136,6 +137,15 @@ func Setup(
 			subs.POST("/:id/refresh", subH.Refresh)
 			subs.GET("/:id/nodes", subH.GetNodes)
 			subs.GET("/:id/token", subH.GetToken)
+		}
+
+		// Favorites
+		favorites := api.Group("/favorites")
+		{
+			favorites.GET("", favH.List)
+			favorites.POST("", favH.Add)
+			favorites.DELETE("/:nodeId", favH.Remove)
+			favorites.GET("/:nodeId/check", favH.IsFavorite)
 		}
 
 		// Batch operations
