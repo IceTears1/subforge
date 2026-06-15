@@ -1,5 +1,5 @@
 #!/bin/bash
-# SubForge One-Click Installer (Fast Version)
+# SubForge One-Click Installer (Python Version)
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 
 set -euo pipefail
@@ -15,7 +15,6 @@ NC='\033[0m'
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
 PORT=8080
-BACKEND_PORT=8081
 ADMIN_PASSWORD=""
 DB_PASSWORD=""
 JWT_SECRET=""
@@ -43,7 +42,7 @@ detect_arch() {
         armv7l)        GOARCH="arm" ;;
         *)             GOARCH="amd64" ;;
     esac
-    info "架构: $ARCH → $GOARCH"
+    info "架构: $ARCH"
 }
 
 install_docker() {
@@ -73,20 +72,6 @@ install_compose() {
     log "Docker Compose 安装完成"
 }
 
-install_go() {
-    info "检查 Go..."
-    if command -v go &>/dev/null; then
-        log "Go 已安装: $(go version | awk '{print $3}')"
-        return
-    fi
-    warn "安装 Go..."
-    GO_VERSION="1.23.0"
-    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" | tar -C /usr/local -xzf -
-    export PATH=$PATH:/usr/local/go/bin
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
-    log "Go 安装完成"
-}
-
 clone_repo() {
     info "下载代码..."
     if [ -d "$INSTALL_DIR/.git" ]; then
@@ -104,38 +89,6 @@ clone_repo() {
     fi
 }
 
-build_backend() {
-    info "编译后端..."
-    cd "$INSTALL_DIR/backend"
-
-    # Use Docker to build (no need to install Go locally)
-    docker run --rm \
-        -v "$(pwd):/app" \
-        -w /app \
-        -e GOPROXY=https://goproxy.cn,direct \
-        -e GONOSUMCHECK="*" \
-        -e GOFLAGS="-mod=mod" \
-        golang:1.21-alpine \
-        sh -c "CGO_ENABLED=0 GOOS=linux GOARCH=${GOARCH} go build -ldflags='-s -w' -o /app/subforge ./cmd/server"
-
-    chmod +x subforge
-    log "后端编译完成"
-}
-
-build_frontend() {
-    info "编译前端..."
-    cd "$INSTALL_DIR/frontend"
-
-    # Use Docker to build
-    docker run --rm \
-        -v "$(pwd):/app" \
-        -w /app \
-        node:20-alpine \
-        sh -c "npm config set registry https://registry.npmmirror.com && npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps && npm run build"
-
-    log "前端编译完成"
-}
-
 generate_config() {
     info "生成配置..."
     cd "$INSTALL_DIR"
@@ -145,7 +98,7 @@ generate_config() {
     [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
 
     cat > .env <<EOF
-PORT=${BACKEND_PORT}
+PORT=${PORT}
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
@@ -158,27 +111,30 @@ ADMIN_IP_WHITELIST=
 GIN_MODE=release
 EOF
 
-    # Also save the main port for reference
-    echo "NGINX_PORT=${PORT}" >> .env
-
     log "配置已生成"
+}
+
+build_frontend() {
+    info "编译前端..."
+    cd "$INSTALL_DIR/frontend"
+
+    docker run --rm \
+        -v "$(pwd):/app" \
+        -w /app \
+        node:20-alpine \
+        sh -c "npm config set registry https://registry.npmmirror.com && npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps && npm run build"
+
+    log "前端编译完成"
 }
 
 start_services() {
     info "启动服务..."
     cd "$INSTALL_DIR"
 
-    # Start only PostgreSQL and Nginx via Docker
-    docker compose up -d postgres nginx
+    docker compose down --remove-orphans 2>/dev/null || true
 
-    # Wait for PostgreSQL
-    info "等待数据库就绪..."
-    sleep 5
-
-    # Start backend directly
-    info "启动后端服务..."
-    pkill -f "./subforge" 2>/dev/null || true
-    nohup ./subforge > /var/log/subforge.log 2>&1 &
+    info "构建并启动 Docker 服务..."
+    docker compose up -d --build
 
     log "服务已启动"
 }
@@ -186,11 +142,11 @@ start_services() {
 wait_health() {
     info "等待服务就绪..."
 
-    local max=30
+    local max=60
     local count=0
 
     while [ $count -lt $max ]; do
-        if curl -sf "http://localhost:${BACKEND_PORT}/api/health" >/dev/null 2>&1; then
+        if curl -sf "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
             log "服务就绪 (${count}s)"
             return
         fi
@@ -198,7 +154,7 @@ wait_health() {
         count=$((count + 2))
     done
 
-    warn "服务启动较慢，请检查日志: tail -f /var/log/subforge.log"
+    warn "服务启动较慢，请检查日志: docker compose logs"
 }
 
 get_public_ip() {
@@ -222,7 +178,7 @@ main() {
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本 (快速版)${NC}"
+    echo -e "  ${BOLD}一键安装脚本 (Python 版)${NC}"
     echo ""
 
     check_root
@@ -236,8 +192,7 @@ main() {
     clone_repo
     generate_config
 
-    # Build (using Docker for compilation only)
-    build_backend
+    # Build frontend
     build_frontend
 
     # Start services
@@ -255,8 +210,8 @@ main() {
     echo -e "  用户名:   ${CYAN}admin${NC}"
     echo -e "  密码:     ${CYAN}${ADMIN_PASSWORD}${NC}"
     echo ""
-    echo -e "  ${DIM}查看日志: tail -f /var/log/subforge.log${NC}"
-    echo -e "  ${DIM}重启后端: cd ${INSTALL_DIR} && ./subforge${NC}"
+    echo -e "  ${DIM}查看日志: cd ${INSTALL_DIR} && docker compose logs -f${NC}"
+    echo -e "  ${DIM}重启服务: cd ${INSTALL_DIR} && docker compose restart${NC}"
     echo ""
 }
 

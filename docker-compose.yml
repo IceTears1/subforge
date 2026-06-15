@@ -9,7 +9,6 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-subforge123}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./backend/migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
     healthcheck:
@@ -17,16 +16,33 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '0.5'
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    networks:
+      - subforge
+
+  backend:
+    build:
+      context: ./backend-python
+      dockerfile: Dockerfile
+    container_name: subforge-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-subforge}
+      DB_USER: ${DB_USER:-subforge}
+      DB_PASSWORD: ${DB_PASSWORD:-subforge123}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     networks:
       - subforge
 
@@ -37,23 +53,11 @@ services:
     ports:
       - "${PORT:-8080}:80"
     volumes:
-      - ./nginx/nginx-host.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx-python.conf:/etc/nginx/nginx.conf:ro
       - ./frontend/dist:/usr/share/nginx/html:ro
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.25'
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - subforge
 
