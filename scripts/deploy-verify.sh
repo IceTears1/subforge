@@ -8,9 +8,18 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
 
-PORT=${1:-8080}
+INSTALL_DIR="/opt/subforge"
+
+# Source .env to get PORT and ADMIN_PASSWORD
+if [ -f "$INSTALL_DIR/.env" ]; then
+    PORT=$(grep -E '^PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
+    ADMIN_PASSWORD=$(grep -E '^ADMIN_PASSWORD=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
+fi
+PORT=${1:-${PORT:-8080}}
+ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
 BASE_URL="http://localhost:${PORT}"
 PASS=0
 FAIL=0
@@ -45,7 +54,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/" 2>/dev/null ||
 echo -e "${YELLOW}[3/8] Login...${NC}"
 LOGIN=$(curl -s -X POST "${BASE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}' 2>/dev/null || echo "error")
+    -d "{\"username\":\"admin\",\"password\":\"${ADMIN_PASSWORD}\"}" 2>/dev/null || echo "error")
 TOKEN=$(echo "$LOGIN" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
 [ -n "$TOKEN" ] && check "Login" "ok" || check "Login" "no token received"
 

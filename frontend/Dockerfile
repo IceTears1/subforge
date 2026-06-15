@@ -1,7 +1,7 @@
 FROM node:20-alpine AS builder
 
-# Use Chinese npm mirror for faster downloads
-RUN npm config set registry https://registry.npmmirror.com
+# npm registry: try Chinese mirror first, fall back to default
+RUN npm config set registry https://registry.npmmirror.com || true
 
 WORKDIR /app
 COPY package.json ./
@@ -11,8 +11,11 @@ RUN npm run build
 
 FROM nginx:alpine
 
-# Use Alpine mirrors for China
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+# Install dependencies (try Aliyun mirror, fall back to default)
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories 2>/dev/null; \
+    apk --no-cache add curl || \
+    (sed -i 's/mirrors.aliyun.com/dl-cdn.alpinelinux.org/g' /etc/apk/repositories 2>/dev/null; \
+     apk --no-cache add curl)
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf

@@ -8,9 +8,16 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
 
 INSTALL_DIR="/opt/subforge"
+
+# Source .env to get PORT
+if [ -f "$INSTALL_DIR/.env" ]; then
+    PORT=$(grep -E '^PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
+fi
+PORT=${PORT:-8080}
 
 echo -e "${CYAN}SubForge Rollback${NC}"
 echo "=================="
@@ -59,16 +66,16 @@ fi
 
 # Rollback
 echo -e "${YELLOW}[1/3] Rolling back...${NC}"
-git checkout "$TARGET"
+git checkout -B main "$TARGET"
 
 echo -e "${YELLOW}[2/3] Rebuilding...${NC}"
-docker compose down
+docker compose down --remove-orphans
 docker compose up -d --build
 
 echo -e "${YELLOW}[3/3] Verifying...${NC}"
 sleep 5
 
-HEALTH=$(curl -s http://localhost:${PORT:-8080}/api/health 2>/dev/null || echo '{"status":"error"}')
+HEALTH=$(curl -s "http://localhost:${PORT}/api/health" 2>/dev/null || echo '{"status":"error"}')
 if echo "$HEALTH" | grep -q '"status":"ok"'; then
     echo -e "  ${GREEN}✓ Health check passed${NC}"
 else

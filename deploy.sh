@@ -35,9 +35,13 @@ PORT=8080
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
+DB_SSL_MODE=disable
 JWT_SECRET=${JWT_SECRET}
 JWT_EXPIRY=24h
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
+CORS_ORIGINS=
+ADMIN_IP_WHITELIST=
+GIN_MODE=release
 EOF
     echo -e "${GREEN}  .env created${NC}"
     echo -e "${YELLOW}  Default admin password: ${ADMIN_PASSWORD}${NC}"

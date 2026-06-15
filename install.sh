@@ -1,4 +1,10 @@
 #!/bin/bash
+
+# ── Ensure we can read from the terminal even when piped (curl | bash) ──
+if [ ! -t 0 ] && [ -e /dev/tty ]; then
+    exec < /dev/tty
+fi
+
 set -e
 
 RED='\033[0;31m'
@@ -23,33 +29,115 @@ echo -e "  ${BOLD}VPN Subscription Universal Converter${NC}"
 echo -e "  ${DIM}One-Click Interactive Installer${NC}"
 echo ""
 
+# ─────────────────────────────────────
+# Root check
+# ─────────────────────────────────────
 if [ "$(id -u)" -ne 0 ]; then
     echo -e "${RED}Error: Please run as root${NC}"
     exit 1
 fi
 
+# ─────────────────────────────────────
+# OS & package manager detection
+# ─────────────────────────────────────
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_ID="${ID}"
+        OS_LIKE="${ID_LIKE:-$ID}"
+    elif [ -f /etc/redhat-release ]; then
+        OS_ID="centos"
+        OS_LIKE="rhel"
+    else
+        OS_ID="unknown"
+        OS_LIKE="unknown"
+    fi
+
+    case "$OS_ID" in
+        ubuntu|debian|linuxmint|pop)
+            PKG_MANAGER="apt"
+            PKG_INSTALL="apt-get install -y -qq"
+            PKG_UPDATE="apt-get update -qq"
+            ;;
+        centos|rhel|rocky|alma|fedora)
+            if command -v dnf &>/dev/null; then
+                PKG_MANAGER="dnf"
+                PKG_INSTALL="dnf install -y -q"
+                PKG_UPDATE="dnf makecache -q"
+            else
+                PKG_MANAGER="yum"
+                PKG_INSTALL="yum install -y -q"
+                PKG_UPDATE="yum makecache -q"
+            fi
+            ;;
+        alpine)
+            PKG_MANAGER="apk"
+            PKG_INSTALL="apk add --no-cache"
+            PKG_UPDATE="apk update -q"
+            ;;
+        arch|manjaro)
+            PKG_MANAGER="pacman"
+            PKG_INSTALL="pacman -S --noconfirm --needed"
+            PKG_UPDATE="pacman -Sy"
+            ;;
+        *)
+            # Try to detect from ID_LIKE
+            case "$OS_LIKE" in
+                *debian*|*ubuntu*)
+                    PKG_MANAGER="apt"
+                    PKG_INSTALL="apt-get install -y -qq"
+                    PKG_UPDATE="apt-get update -qq"
+                    ;;
+                *rhel*|*centos*|*fedora*)
+                    if command -v dnf &>/dev/null; then
+                        PKG_MANAGER="dnf"
+                        PKG_INSTALL="dnf install -y -q"
+                        PKG_UPDATE="dnf makecache -q"
+                    else
+                        PKG_MANAGER="yum"
+                        PKG_INSTALL="yum install -y -q"
+                        PKG_UPDATE="yum makecache -q"
+                    fi
+                    ;;
+                *)
+                    PKG_MANAGER="unknown"
+                    ;;
+            esac
+            ;;
+    esac
+
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64)  ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        armv7l)        ARCH="armv7" ;;
+    esac
+}
+
+detect_os
+echo -e "  ${DIM}OS: ${OS_ID} | Arch: ${ARCH} | Pkg: ${PKG_MANAGER}${NC}"
+echo ""
+
+# ─────────────────────────────────────
+# Helper functions
+# ─────────────────────────────────────
 gen_pass() {
     openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c "$1"
 }
 
-# Always try to read from /dev/tty for interactive input
 ask_input() {
     local prompt="$1"
     local default="$2"
     local result=""
-    if [ -e /dev/tty ]; then
-        read -p "$(echo -e ${CYAN}${prompt} [${default}]: ${NC})" result < /dev/tty
-    fi
+    read -p "$(echo -e "${CYAN}${prompt} [${default}]: ${NC}")" result
     echo "${result:-$default}"
 }
 
 ask_secret() {
     local prompt="$1"
     local result=""
-    if [ -e /dev/tty ]; then
-        read -s -p "$(echo -e ${CYAN}${prompt}: ${NC})" result < /dev/tty
-        echo "" >&2
-    fi
+    read -s -p "$(echo -e "${CYAN}${prompt}: ${NC}")" result
+    echo "" >&2
     echo "$result"
 }
 
@@ -57,13 +145,24 @@ ask_yes_no() {
     local prompt="$1"
     local default="$2"
     local choice="$default"
-    if [ -e /dev/tty ]; then
-        read -p "$(echo -e ${CYAN}${prompt} [${default}]: ${NC})" choice < /dev/tty
-        choice=${choice:-$default}
-    fi
+    read -p "$(echo -e "${CYAN}${prompt} [${default}]: ${NC}")" choice
+    choice=${choice:-$default}
     [[ "$choice" =~ ^[Yy]$ ]]
 }
 
+ensure_cmd() {
+    local cmd="$1"
+    local pkg="$2"
+    if ! command -v "$cmd" &>/dev/null; then
+        echo -e "  ${YELLOW}Installing ${pkg}...${NC}"
+        $PKG_UPDATE 2>/dev/null || true
+        $PKG_INSTALL "$pkg" 2>/dev/null || true
+    fi
+}
+
+# ─────────────────────────────────────
+# Configuration wizard
+# ─────────────────────────────────────
 echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
 echo -e "${YELLOW}${BOLD}         配置向导 Configuration${NC}"
 echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
@@ -135,38 +234,123 @@ if ! ask_yes_no "  确认安装?" "y"; then
     exit 0
 fi
 
+# ─────────────────────────────────────
+# Step 1: Install Docker
+# ─────────────────────────────────────
 echo ""
 echo -e "${GREEN}[1/5] 检查 Docker...${NC}"
 if command -v docker &>/dev/null; then
     echo -e "  ${GREEN}✓ $(docker --version | head -1)${NC}"
 else
-    echo -e "  ${YELLOW}安装中...${NC}"
-    curl -fsSL https://get.docker.com | bash
-    systemctl enable docker && systemctl start docker
-    echo -e "  ${GREEN}✓ 完成${NC}"
+    echo -e "  ${YELLOW}安装 Docker...${NC}"
+
+    # Try official install script first (works on most systems)
+    if curl -fsSL https://get.docker.com | bash 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Docker 已安装${NC}"
+    else
+        # Fallback: install via package manager
+        echo -e "  ${YELLOW}尝试通过包管理器安装...${NC}"
+        case "$PKG_MANAGER" in
+            apt)
+                $PKG_UPDATE
+                $PKG_INSTALL docker.io
+                ;;
+            dnf|yum)
+                $PKG_INSTALL docker
+                ;;
+            apk)
+                $PKG_INSTALL docker
+                ;;
+            pacman)
+                $PKG_INSTALL docker
+                ;;
+            *)
+                echo -e "  ${RED}✗ 无法自动安装 Docker，请手动安装${NC}"
+                echo -e "  ${DIM}参考: https://docs.docker.com/engine/install/${NC}"
+                exit 1
+                ;;
+        esac
+    fi
+
+    # Enable and start Docker
+    if command -v systemctl &>/dev/null; then
+        systemctl enable docker 2>/dev/null || true
+        systemctl start docker 2>/dev/null || true
+    elif command -v rc-update &>/dev/null; then
+        rc-update add docker boot 2>/dev/null || true
+        service docker start 2>/dev/null || true
+    fi
+    echo -e "  ${GREEN}✓ Docker 服务已启动${NC}"
 fi
 
+# ─────────────────────────────────────
+# Step 2: Install Docker Compose
+# ─────────────────────────────────────
 echo -e "${GREEN}[2/5] 检查 Compose...${NC}"
 if docker compose version &>/dev/null; then
-    echo -e "  ${GREEN}✓ OK${NC}"
+    echo -e "  ${GREEN}✓ $(docker compose version --short 2>/dev/null || echo 'OK')${NC}"
 else
-    mkdir -p /usr/local/lib/docker/cli-plugins
-    curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
-        -o /usr/local/lib/docker/cli-plugins/docker-compose
-    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-    echo -e "  ${GREEN}✓ 安装完成${NC}"
+    echo -e "  ${YELLOW}安装 Docker Compose...${NC}"
+
+    COMPOSE_DIR="/usr/local/lib/docker/cli-plugins"
+    mkdir -p "$COMPOSE_DIR"
+
+    # Try downloading from GitHub
+    COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}"
+    if curl -SL --connect-timeout 15 --retry 3 "$COMPOSE_URL" \
+        -o "$COMPOSE_DIR/docker-compose" 2>/dev/null; then
+        chmod +x "$COMPOSE_DIR/docker-compose"
+    else
+        # Fallback: install via package manager
+        echo -e "  ${YELLOW}GitHub 下载失败，尝试包管理器...${NC}"
+        case "$PKG_MANAGER" in
+            apt)
+                $PKG_INSTALL docker-compose-plugin 2>/dev/null || \
+                $PKG_INSTALL docker-compose 2>/dev/null
+                ;;
+            dnf|yum)
+                $PKG_INSTALL docker-compose-plugin 2>/dev/null || \
+                $PKG_INSTALL docker-compose 2>/dev/null
+                ;;
+            apk)
+                $PKG_INSTALL docker-compose 2>/dev/null
+                ;;
+            *)
+                echo -e "  ${RED}✗ 无法自动安装 Docker Compose${NC}"
+                exit 1
+                ;;
+        esac
+    fi
+
+    if docker compose version &>/dev/null; then
+        echo -e "  ${GREEN}✓ Docker Compose 已安装${NC}"
+    else
+        echo -e "  ${RED}✗ Docker Compose 安装失败${NC}"
+        exit 1
+    fi
 fi
 
+# ─────────────────────────────────────
+# Step 3: Download code
+# ─────────────────────────────────────
 echo -e "${GREEN}[3/5] 下载代码...${NC}"
 if [ -d "$INSTALL_DIR/.git" ]; then
-    cd "$INSTALL_DIR" && git pull origin main
+    cd "$INSTALL_DIR"
+    # Save current commit for potential rollback
+    OLD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    git fetch origin main
+    git reset --hard origin/main
+    echo -e "  ${GREEN}✓ 已更新 (${OLD_COMMIT} → $(git rev-parse --short HEAD))${NC}"
 else
     rm -rf "$INSTALL_DIR"
     git clone "$REPO" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
+    echo -e "  ${GREEN}✓ 已克隆${NC}"
 fi
-echo -e "  ${GREEN}✓ 完成${NC}"
 
+# ─────────────────────────────────────
+# Step 4: Generate config
+# ─────────────────────────────────────
 echo -e "${GREEN}[4/5] 生成配置...${NC}"
 cat > .env <<ENVEOF
 PORT=${PORT}
@@ -183,16 +367,66 @@ GIN_MODE=release
 ENVEOF
 echo -e "  ${GREEN}✓ .env 已生成${NC}"
 
+# ─────────────────────────────────────
+# Step 5: Start services
+# ─────────────────────────────────────
 echo -e "${GREEN}[5/5] 启动服务...${NC}"
-docker compose down 2>/dev/null || true
+docker compose down --remove-orphans 2>/dev/null || true
 docker compose up -d --build
-echo -e "  ${YELLOW}等待启动...${NC}"
-sleep 15
 
+echo -e "  ${YELLOW}等待服务就绪...${NC}"
+
+# Wait for health check instead of blind sleep
+WAIT_COUNT=0
+WAIT_MAX=60
+while [ $WAIT_COUNT -lt $WAIT_MAX ]; do
+    if curl -sf "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    # Show progress every 10 seconds
+    if [ $((WAIT_COUNT % 5)) -eq 0 ]; then
+        echo -e "  ${DIM}等待中... ($((WAIT_COUNT * 2))s)${NC}"
+    fi
+done
+
+if [ $WAIT_COUNT -ge $WAIT_MAX ]; then
+    echo -e "  ${YELLOW}⚠ 服务启动较慢，请检查日志: docker compose logs${NC}"
+else
+    echo -e "  ${GREEN}✓ 服务已就绪 ($((WAIT_COUNT * 2))s)${NC}"
+fi
+
+# ─────────────────────────────────────
 # Firewall
-ufw allow "$PORT"/tcp 2>/dev/null || true
+# ─────────────────────────────────────
+echo -e "${DIM}配置防火墙...${NC}"
+if command -v ufw &>/dev/null; then
+    ufw allow "$PORT"/tcp 2>/dev/null || true
+    echo -e "  ${GREEN}✓ ufw: 端口 ${PORT} 已开放${NC}"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --permanent --add-port="${PORT}/tcp" 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    echo -e "  ${GREEN}✓ firewalld: 端口 ${PORT} 已开放${NC}"
+elif command -v iptables &>/dev/null; then
+    iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || true
+    # Try to persist iptables rules
+    if command -v iptables-save &>/dev/null; then
+        iptables-save > /etc/iptables.rules 2>/dev/null || true
+    fi
+    echo -e "  ${GREEN}✓ iptables: 端口 ${PORT} 已开放${NC}"
+fi
 
-PUBLIC_IP=$(curl -s --connect-timeout 3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+# Get public IP (try multiple services)
+PUBLIC_IP=""
+for ip_service in "ifconfig.me" "ipinfo.io/ip" "icanhazip.com" "api.ipify.org"; do
+    PUBLIC_IP=$(curl -s --connect-timeout 5 "https://${ip_service}" 2>/dev/null)
+    if [ -n "$PUBLIC_IP" ] && echo "$PUBLIC_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        break
+    fi
+done
+[ -z "$PUBLIC_IP" ] && PUBLIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$PUBLIC_IP" ] && PUBLIC_IP="<server-ip>"
 
 echo ""
 echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
@@ -202,8 +436,13 @@ echo ""
 echo -e "  URL:      ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
 echo -e "  用户名:   ${CYAN}admin${NC}"
 echo -e "  密码:     ${CYAN}${ADMIN_PASSWORD}${NC}"
+if [ -n "$DOMAIN" ]; then
+    echo -e "  域名:     ${CYAN}${DOMAIN}${NC}"
+    echo -e "  ${DIM}配置 SSL: sudo bash setup-ssl.sh${NC}"
+fi
 echo ""
-echo -e "  ${DIM}日志: cd ${INSTALL_DIR} && docker compose logs -f${NC}"
-echo -e "  ${DIM}重启: cd ${INSTALL_DIR} && docker compose restart${NC}"
-echo -e "  ${DIM}更新: cd ${INSTALL_DIR} && git pull && docker compose up -d --build${NC}"
+echo -e "  ${DIM}日志:   cd ${INSTALL_DIR} && docker compose logs -f${NC}"
+echo -e "  ${DIM}重启:   cd ${INSTALL_DIR} && docker compose restart${NC}"
+echo -e "  ${DIM}更新:   cd ${INSTALL_DIR} && git fetch origin main && git reset --hard origin/main && docker compose up -d --build${NC}"
+echo -e "  ${DIM}健康检查: cd ${INSTALL_DIR} && bash scripts/health-check.sh${NC}"
 echo ""

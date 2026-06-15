@@ -1,7 +1,7 @@
 FROM golang:1.25-alpine AS builder
 
-# Use Chinese Go proxy for faster downloads
-ENV GOPROXY=https://goproxy.cn,direct
+# Go proxy: try Chinese mirror first, fall back to default
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct
 ENV GO111MODULE=on
 
 WORKDIR /app
@@ -12,9 +12,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /subforge ./cmd/server
 
 FROM alpine:3.19
 
-# Use Alpine mirrors for China
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
-RUN apk --no-cache add ca-certificates tzdata
+# Install dependencies (try Aliyun mirror, fall back to default)
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories 2>/dev/null; \
+    apk --no-cache add ca-certificates tzdata || \
+    (sed -i 's/mirrors.aliyun.com/dl-cdn.alpinelinux.org/g' /etc/apk/repositories 2>/dev/null; \
+     apk --no-cache add ca-certificates tzdata)
 
 WORKDIR /app
 COPY --from=builder /subforge .

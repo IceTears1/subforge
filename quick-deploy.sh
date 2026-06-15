@@ -11,6 +11,15 @@ INSTALL_DIR="/opt/subforge"
 GO_VERSION="1.25.0"
 NODE_VERSION="20"
 
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64|amd64)  GO_ARCH="amd64" ;;
+    aarch64|arm64) GO_ARCH="arm64" ;;
+    armv7l)        GO_ARCH="armv6l" ;;
+    *)             GO_ARCH="amd64" ;;
+esac
+
 echo -e "${CYAN}SubForge Quick Deploy (Debian/Ubuntu)${NC}"
 echo ""
 
@@ -32,8 +41,12 @@ echo -e "${YELLOW}[2/7] 安装 Go...${NC}"
 if command -v go &>/dev/null; then
     echo -e "  ${GREEN}✓ 已安装: $(go version | awk '{print $3}')${NC}"
 else
-    echo -e "  下载 Go ${GO_VERSION}..."
-    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
+    echo -e "  下载 Go ${GO_VERSION} (${GO_ARCH})..."
+    if ! wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz 2>/dev/null; then
+        echo -e "  ${RED}✗ Go 下载失败，请检查网络或手动安装${NC}"
+        echo -e "  ${DIM}参考: https://go.dev/dl/${NC}"
+        exit 1
+    fi
     rm -rf /usr/local/go
     tar -C /usr/local -xzf /tmp/go.tar.gz
     rm /tmp/go.tar.gz

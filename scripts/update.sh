@@ -8,6 +8,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
 
 INSTALL_DIR="/opt/subforge"
@@ -20,7 +21,7 @@ echo ""
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${RED}Please run as root: sudo bash update.sh${NC}"
+    echo -e "${RED}Please run as root: sudo bash scripts/update.sh${NC}"
     exit 1
 fi
 
@@ -32,11 +33,17 @@ fi
 
 cd "$INSTALL_DIR"
 
+# Source .env to get PORT
+if [ -f .env ]; then
+    PORT=$(grep -E '^PORT=' .env | cut -d'=' -f2 | tr -d '[:space:]')
+fi
+PORT=${PORT:-8080}
+
 # Get current version
 CURRENT_COMMIT=$(git rev-parse --short HEAD)
 echo -e "Current version: ${CYAN}${CURRENT_COMMIT}${NC}"
 
-# Step 1: Backup
+# Step 1: Backup .env and docker-compose overrides
 echo -e "${YELLOW}[1/6] Creating backup...${NC}"
 mkdir -p "$BACKUP_DIR"
 BACKUP_FILE="$BACKUP_DIR/backup_${TIMESTAMP}.tar.gz"
@@ -58,9 +65,10 @@ if [ "$LOCAL" = "$REMOTE" ]; then
     exit 0
 fi
 
-git pull origin main
+OLD_COMMIT=$(git rev-parse --short HEAD)
+git reset --hard origin/main
 NEW_COMMIT=$(git rev-parse --short HEAD)
-echo -e "  ${GREEN}Updated: ${CURRENT_COMMIT} → ${NEW_COMMIT}${NC}"
+echo -e "  ${GREEN}Updated: ${OLD_COMMIT} → ${NEW_COMMIT}${NC}"
 
 # Step 3: Show changes
 echo -e "${YELLOW}[3/6] Changes:${NC}"
@@ -73,20 +81,30 @@ docker compose build --no-cache 2>&1 | tail -5
 
 # Step 5: Restart
 echo -e "${YELLOW}[5/6] Restarting services...${NC}"
-docker compose down
+docker compose down --remove-orphans
 docker compose up -d
 
 # Step 6: Verify
 echo -e "${YELLOW}[6/6] Verifying deployment...${NC}"
-sleep 5
+WAIT_COUNT=0
+WAIT_MAX=30
+HEALTH_OK=false
+while [ $WAIT_COUNT -lt $WAIT_MAX ]; do
+    HEALTH=$(curl -s "http://localhost:${PORT}/api/health" 2>/dev/null || echo '{"status":"error"}')
+    if echo "$HEALTH" | grep -q '"status":"ok"'; then
+        HEALTH_OK=true
+        break
+    fi
+    sleep 2
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+done
 
-HEALTH=$(curl -s http://localhost:${PORT:-8080}/api/health 2>/dev/null || echo '{"status":"error"}')
-if echo "$HEALTH" | grep -q '"status":"ok"'; then
-    echo -e "  ${GREEN}✓ Health check passed${NC}"
+if [ "$HEALTH_OK" = true ]; then
+    echo -e "  ${GREEN}✓ Health check passed ($((WAIT_COUNT * 2))s)${NC}"
 else
     echo -e "  ${RED}✗ Health check failed${NC}"
     echo -e "  ${YELLOW}Rolling back...${NC}"
-    docker compose down
+    docker compose down --remove-orphans
     git checkout "$LOCAL"
     docker compose up -d
     echo -e "  ${GREEN}Rolled back to ${CURRENT_COMMIT}${NC}"
@@ -100,5 +118,5 @@ echo -e "  Version: ${CYAN}${NEW_COMMIT}${NC}"
 echo -e "  Backup:  ${CYAN}${BACKUP_FILE}${NC}"
 echo ""
 echo -e "  ${YELLOW}Rollback command:${NC}"
-echo -e "    cd $INSTALL_DIR && git checkout ${CURRENT_COMMIT} && docker compose up -d"
+echo -e "    cd $INSTALL_DIR && git checkout ${OLD_COMMIT} && docker compose up -d --build"
 echo ""
