@@ -6,11 +6,21 @@
           <n-space vertical>
             <n-descriptions :column="1" bordered>
               <n-descriptions-item label="当前版本">
-                <n-tag type="info">{{ versionInfo.current || '...' }}</n-tag>
+                <n-space>
+                  <n-tag type="info">{{ versionInfo.current_tag || versionInfo.current || '...' }}</n-tag>
+                  <n-text v-if="versionInfo.current_tag" depth="3" style="font-size: 12px">
+                    {{ versionInfo.current }}
+                  </n-text>
+                </n-space>
               </n-descriptions-item>
               <n-descriptions-item label="最新版本">
                 <n-tag :type="versionInfo.has_update ? 'warning' : 'success'">
-                  {{ versionInfo.latest || '...' }}
+                  {{ versionInfo.latest_tag || versionInfo.latest || '...' }}
+                </n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="更新模式">
+                <n-tag :type="versionInfo.update_mode === 'tag' ? 'success' : 'info'" size="small">
+                  {{ versionInfo.update_mode === 'tag' ? 'Tag 版本管理' : 'Main 分支同步' }}
                 </n-tag>
               </n-descriptions-item>
               <n-descriptions-item label="状态">
@@ -32,10 +42,10 @@
                 v-if="versionInfo.has_update && !versionInfo.updating"
                 type="warning"
                 :loading="updating"
-                @click="handleUpdate"
+                @click="handleUpdateToLatest"
               >
                 <template #icon><n-icon :component="CloudDownloadOutline" /></template>
-                立即更新
+                更新到最新
               </n-button>
               <n-button
                 v-if="versionInfo.updating"
@@ -73,14 +83,6 @@
               <n-descriptions-item label="新版本">
                 <n-tag size="small" type="success">{{ updateResult.to }}</n-tag>
               </n-descriptions-item>
-              <n-descriptions-item label="时间">
-                {{ new Date(updateResult.timestamp).toLocaleString() }}
-              </n-descriptions-item>
-              <n-descriptions-item label="状态">
-                <n-tag :type="updateResult.success ? 'success' : 'error'" size="small">
-                  {{ updateResult.success ? '成功' : '失败' }}
-                </n-tag>
-              </n-descriptions-item>
             </n-descriptions>
           </n-space>
         </n-card>
@@ -109,17 +111,31 @@
       </n-gi>
 
       <n-gi>
-        <n-card title="更新日志" :bordered="false">
-          <n-spin :show="loadingChangelog">
+        <n-card title="发布历史" :bordered="false">
+          <n-spin :show="loadingReleases">
             <n-timeline>
               <n-timeline-item
-                v-for="(entry, index) in changelog"
-                :key="entry.hash"
-                :type="index === 0 ? 'success' : 'default'"
-                :title="entry.message"
-                :content="entry.hash"
-                :time="formatDate(entry.date)"
-              />
+                v-for="release in releases"
+                :key="release.tag"
+                :type="release.is_current ? 'success' : 'default'"
+                :title="release.tag"
+                :content="release.message"
+                :time="formatDate(release.date)"
+              >
+                <template #footer>
+                  <n-button
+                    v-if="!release.is_current"
+                    size="tiny"
+                    quaternary
+                    type="primary"
+                    @click="handleUpdateToTag(release.tag)"
+                    :loading="updatingToTag === release.tag"
+                  >
+                    更新到此版本
+                  </n-button>
+                  <n-tag v-else size="tiny" type="success">当前版本</n-tag>
+                </template>
+              </n-timeline-item>
             </n-timeline>
           </n-spin>
         </n-card>
@@ -130,27 +146,31 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useMessage, NGrid, NGi, NCard, NDescriptions, NDescriptionsItem, NTag, NSpace, NButton, NIcon, NSelect, NAlert, NTimeline, NTimelineItem, NSpin } from 'naive-ui'
+import { useMessage, NGrid, NGi, NCard, NDescriptions, NDescriptionsItem, NTag, NText, NSpace, NButton, NIcon, NSelect, NAlert, NTimeline, NTimelineItem, NSpin } from 'naive-ui'
 import { RefreshOutline, CloudDownloadOutline } from '@vicons/ionicons5'
-import { getVersion, getUpdateStatus, getChangelog, performUpdate, performRollback } from '../api/update'
-import type { VersionInfo, VersionEntry, UpdateResult } from '../api/update'
+import { getVersion, getReleases, getUpdateStatus, updateToLatest, updateToTag, performRollback } from '../api/update'
+import type { VersionInfo, Release, UpdateResult } from '../api/update'
 
 const message = useMessage()
 const isMobile = ref(window.innerWidth <= 768)
 const checking = ref(false)
 const updating = ref(false)
 const rollingBack = ref(false)
-const loadingChangelog = ref(false)
-const versionInfo = ref<VersionInfo>({ current: '', latest: '', has_update: false, changelog: '', last_check: '', updating: false })
-const changelog = ref<VersionEntry[]>([])
+const loadingReleases = ref(false)
+const versionInfo = ref<VersionInfo>({
+  current: '', current_tag: '', latest: '', latest_tag: '',
+  has_update: false, changelog: '', last_check: '', update_mode: 'tag', updating: false
+})
+const releases = ref<Release[]>([])
 const rollbackTarget = ref<string | null>(null)
 const updateResult = ref<UpdateResult | null>(null)
+const updatingToTag = ref<string | null>(null)
 let statusTimer: number | null = null
 
 const versionOptions = computed(() =>
-  changelog.value.map(v => ({
-    label: `${v.hash} - ${v.message}`,
-    value: v.hash,
+  releases.value.map(r => ({
+    label: `${r.tag} - ${r.message}`,
+    value: r.tag,
   }))
 )
 
@@ -181,19 +201,19 @@ async function checkVersion() {
     }
     message.success('版本信息已更新')
   } catch (e: any) {
-    message.error('检查版本失败: ' + (e.response?.data?.message || e.message))
+    message.error('检查版本失败')
   } finally {
     checking.value = false
   }
 }
 
-async function loadChangelog() {
-  loadingChangelog.value = true
+async function loadReleases() {
+  loadingReleases.value = true
   try {
-    const res = await getChangelog(20)
-    changelog.value = res.data || []
+    const res = await getReleases()
+    releases.value = res.data || []
   } catch {} finally {
-    loadingChangelog.value = false
+    loadingReleases.value = false
   }
 }
 
@@ -208,41 +228,65 @@ async function pollUpdateStatus() {
       clearInterval(statusTimer)
       statusTimer = null
       updating.value = false
+      updatingToTag.value = null
       checkVersion()
-      loadChangelog()
+      loadReleases()
     }
   } catch {}
 }
 
-async function handleUpdate() {
-  updating.value = true
-  updateResult.value = null
-
-  try {
-    const res = await performUpdate()
-    updateResult.value = res.data
-
-    if (res.data.success) {
-      message.success('更新成功！服务正在重启...')
-    } else {
-      message.error('更新失败: ' + (res.data.error || '未知错误'))
-    }
-  } catch (e: any) {
-    message.error('更新失败: ' + (e.response?.data?.message || e.message))
-    updating.value = false
-    return
-  }
-
-  // Start polling for status
+function startPolling() {
   statusTimer = window.setInterval(pollUpdateStatus, 3000)
-  // Stop polling after 5 minutes
   setTimeout(() => {
     if (statusTimer) {
       clearInterval(statusTimer)
       statusTimer = null
       updating.value = false
+      updatingToTag.value = null
     }
   }, 300000)
+}
+
+async function handleUpdateToLatest() {
+  updating.value = true
+  updateResult.value = null
+
+  try {
+    const res = await updateToLatest()
+    updateResult.value = res.data
+    if (res.data.success) {
+      message.success('更新成功！服务正在重启...')
+    } else {
+      message.error('更新失败')
+    }
+  } catch (e: any) {
+    message.error('更新失败')
+    updating.value = false
+    return
+  }
+  startPolling()
+}
+
+async function handleUpdateToTag(tag: string) {
+  updatingToTag.value = tag
+  updating.value = true
+  updateResult.value = null
+
+  try {
+    const res = await updateToTag(tag)
+    updateResult.value = res.data
+    if (res.data.success) {
+      message.success(`已更新到 ${tag}`)
+    } else {
+      message.error('更新失败')
+    }
+  } catch (e: any) {
+    message.error('更新失败')
+    updating.value = false
+    updatingToTag.value = null
+    return
+  }
+  startPolling()
 }
 
 async function handleRollback() {
@@ -253,18 +297,17 @@ async function handleRollback() {
   try {
     const res = await performRollback(rollbackTarget.value)
     updateResult.value = res.data
-
     if (res.data.success) {
-      message.success('回滚成功！服务正在重启...')
+      message.success('回滚成功！')
       setTimeout(() => {
         checkVersion()
-        loadChangelog()
+        loadReleases()
       }, 5000)
     } else {
-      message.error('回滚失败: ' + (res.data.error || '未知错误'))
+      message.error('回滚失败')
     }
   } catch (e: any) {
-    message.error('回滚失败: ' + (e.response?.data?.message || e.message))
+    message.error('回滚失败')
   } finally {
     rollingBack.value = false
   }
@@ -272,16 +315,12 @@ async function handleRollback() {
 
 onMounted(() => {
   checkVersion()
-  loadChangelog()
-  window.addEventListener('resize', () => { isMobile.value = window.innerWidth <= 768 })
-
-  // Check if update is in progress
+  loadReleases()
   pollUpdateStatus()
+  window.addEventListener('resize', () => { isMobile.value = window.innerWidth <= 768 })
 })
 
 onUnmounted(() => {
-  if (statusTimer) {
-    clearInterval(statusTimer)
-  }
+  if (statusTimer) clearInterval(statusTimer)
 })
 </script>

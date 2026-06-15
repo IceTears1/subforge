@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"strconv"
 	"subforge/internal/pkg/response"
 	"subforge/internal/service"
 
@@ -25,17 +24,18 @@ func (h *UpdateHandler) GetVersion(c *gin.Context) {
 		return
 	}
 
-	// Add update status
 	data := gin.H{
-		"current":    info.Current,
-		"latest":     info.Latest,
-		"has_update": info.HasUpdate,
-		"changelog":  info.Changelog,
-		"last_check": info.LastCheck,
-		"updating":   h.svc.IsUpdating(),
+		"current":     info.Current,
+		"current_tag": info.CurrentTag,
+		"latest":      info.Latest,
+		"latest_tag":  info.LatestTag,
+		"has_update":  info.HasUpdate,
+		"changelog":   info.Changelog,
+		"last_check":  info.LastCheck,
+		"update_mode": info.UpdateMode,
+		"updating":    h.svc.IsUpdating(),
 	}
 
-	// Add last result if available
 	if lastResult := h.svc.GetLastResult(); lastResult != nil {
 		data["last_update"] = lastResult
 	}
@@ -43,19 +43,30 @@ func (h *UpdateHandler) GetVersion(c *gin.Context) {
 	response.OK(c, data)
 }
 
-// GetChangelog returns recent commits.
-func (h *UpdateHandler) GetChangelog(c *gin.Context) {
-	count, _ := strconv.Atoi(c.DefaultQuery("count", "20"))
-	versions, err := h.svc.GetChangelog(count)
+// GetReleases returns all available releases.
+func (h *UpdateHandler) GetReleases(c *gin.Context) {
+	releases, err := h.svc.GetReleases()
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
-	response.OK(c, versions)
+	response.OK(c, releases)
 }
 
-// Update performs the update.
-func (h *UpdateHandler) Update(c *gin.Context) {
+// GetChangelog returns commits between versions.
+func (h *UpdateHandler) GetChangelog(c *gin.Context) {
+	from := c.Query("from")
+	to := c.Query("to")
+	entries, err := h.svc.GetChangelog(from, to, 20)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.OK(c, entries)
+}
+
+// UpdateToLatest updates to the latest version.
+func (h *UpdateHandler) UpdateToLatest(c *gin.Context) {
 	userID := getUserID(c)
 	ip := c.ClientIP()
 
@@ -64,14 +75,43 @@ func (h *UpdateHandler) Update(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.Update()
+	result, err := h.svc.UpdateToLatest()
 	if err != nil {
 		h.audit.Log(userID, "", "update", "system", "update failed: "+err.Error(), ip, false)
-		response.InternalError(c, "update failed: "+err.Error())
+		response.InternalError(c, err.Error())
 		return
 	}
 
 	h.audit.Log(userID, "", "update", "system", "updated: "+result.From+" → "+result.To, ip, true)
+	response.OK(c, result)
+}
+
+// UpdateToTag updates to a specific tag.
+func (h *UpdateHandler) UpdateToTag(c *gin.Context) {
+	userID := getUserID(c)
+	ip := c.ClientIP()
+
+	var req struct {
+		Tag string `json:"tag" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request")
+		return
+	}
+
+	if h.svc.IsUpdating() {
+		response.BadRequest(c, "update already in progress")
+		return
+	}
+
+	result, err := h.svc.UpdateToTag(req.Tag)
+	if err != nil {
+		h.audit.Log(userID, "", "update", "system", "update to "+req.Tag+" failed: "+err.Error(), ip, false)
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	h.audit.Log(userID, "", "update", "system", "updated to "+req.Tag+": "+result.From+" → "+result.To, ip, true)
 	response.OK(c, result)
 }
 
@@ -99,7 +139,7 @@ func (h *UpdateHandler) Rollback(c *gin.Context) {
 	result, err := h.svc.Rollback(req.Version)
 	if err != nil {
 		h.audit.Log(userID, "", "rollback", "system", "rollback failed: "+err.Error(), ip, false)
-		response.InternalError(c, "rollback failed: "+err.Error())
+		response.InternalError(c, err.Error())
 		return
 	}
 

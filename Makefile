@@ -63,3 +63,7 @@ update:
 # Rollback to previous version
 rollback:
 	chmod +x scripts/rollback.sh && sudo bash scripts/rollback.sh
+
+# Create a new release
+release:
+	chmod +x scripts/release.sh && bash scripts/release.sh
