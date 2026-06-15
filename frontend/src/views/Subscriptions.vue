@@ -8,6 +8,9 @@
             <n-button v-if="selectedIds.length > 0" type="warning" @click="handleBatchRefresh">
               刷新选中 ({{ selectedIds.length }})
             </n-button>
+            <n-button v-if="selectedIds.length > 0" @click="handleBatchExport">
+              导出选中 ({{ selectedIds.length }})
+            </n-button>
             <n-popconfirm v-if="selectedIds.length > 0" @positive-click="handleBatchDelete">
               <template #trigger>
                 <n-button type="error">删除选中 ({{ selectedIds.length }})</n-button>
@@ -95,7 +98,7 @@ import ImportModal from '../components/ImportModal.vue'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
-  exportSubscriptions,
+  exportSubscriptions, batchExportSubscriptions,
 } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
@@ -261,6 +264,20 @@ async function handleBatchRefresh() {
     message.success(`已刷新 ${res.data.refreshed} 个订阅`)
     await load()
   } catch { message.error('批量刷新失败') }
+}
+
+async function handleBatchExport() {
+  try {
+    const res = await batchExportSubscriptions(selectedIds.value)
+    const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `subforge-export-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    message.success(`已导出 ${selectedIds.value.length} 个订阅`)
+  } catch { message.error('批量导出失败') }
 }
 
 async function handleCheck(sub: Subscription) {

@@ -138,6 +138,7 @@ func Setup(
 		// Batch operations
 		api.POST("/subscriptions/batch/delete", batchH.BatchDelete)
 		api.POST("/subscriptions/batch/refresh", batchH.BatchRefresh)
+		api.POST("/subscriptions/batch/export", exportH.BatchExport)
 
 		// Export/Import
 		api.GET("/export", exportH.Export)

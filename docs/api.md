@@ -4,10 +4,13 @@ Base URL: `http://your-domain:8080`
 
 ## Authentication
 
-All protected endpoints require a JWT token in the Authorization header:
+All protected endpoints require a JWT token or API key in the Authorization header:
 ```
 Authorization: Bearer <token>
+Authorization: Bearer sf_<api-key>
 ```
+
+API keys start with `sf_` prefix and can be created via the web UI or API.
 
 ---
 
@@ -299,6 +302,84 @@ Create webhook.
 
 ### DELETE /api/webhooks/:id
 Delete webhook.
+
+---
+
+## API Keys
+
+### GET /api/apikeys
+List API keys (masked).
+
+### POST /api/apikeys
+Create API key.
+
+**Request:**
+```json
+{
+  "name": "My Script"
+}
+```
+
+**Response:**
+```json
+{
+  "code": 0,
+  "data": {
+    "id": 1,
+    "name": "My Script",
+    "key": "sf_abc123...",
+    "status": 1
+  }
+}
+```
+
+### DELETE /api/apikeys/:id
+Delete API key.
+
+---
+
+## Batch Operations
+
+### POST /api/subscriptions/batch/delete
+Delete multiple subscriptions.
+
+**Request:**
+```json
+{
+  "ids": [1, 2, 3]
+}
+```
+
+**Response:**
+```json
+{
+  "code": 0,
+  "data": {
+    "deleted": 3
+  }
+}
+```
+
+### POST /api/subscriptions/batch/refresh
+Refresh multiple subscriptions.
+
+### POST /api/subscriptions/batch/export
+Export selected subscriptions as JSON.
+
+---
+
+## Monitoring
+
+### GET /api/metrics
+System metrics (uptime, database stats, memory, goroutines).
+
+### GET /api/audit
+Audit logs (admin only, paginated).
+
+**Query Params:**
+- `page` (int, default: 1)
+- `page_size` (int, default: 20)
+- `action` (string, optional): filter by action
 
 ---
 

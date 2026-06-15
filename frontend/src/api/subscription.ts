@@ -86,3 +86,7 @@ export function batchRefreshSubscriptions(ids: number[]) {
 export function checkSubscriptionHealth(id: number) {
   return api.post(`/subscriptions/${id}/check`)
 }
+
+export function batchExportSubscriptions(ids: number[]) {
+  return api.post('/subscriptions/batch/export', { ids }, { responseType: 'blob' })
+}

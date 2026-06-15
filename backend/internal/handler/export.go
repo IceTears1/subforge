@@ -27,14 +27,45 @@ func (h *ExportHandler) Export(c *gin.Context) {
 		return
 	}
 
-	// Strip sensitive fields
-	type ExportSub struct {
-		Name        string   `json:"name"`
-		URL         string   `json:"url"`
-		AutoRefresh int      `json:"auto_refresh"`
-		Tags        []string `json:"tags"`
+	exported := h.exportSubs(subs)
+	c.Header("Content-Disposition", "attachment; filename=subforge-export.json")
+	c.Header("Content-Type", "application/json")
+	c.JSON(200, exported)
+}
+
+// BatchExport exports selected subscriptions as JSON.
+func (h *ExportHandler) BatchExport(c *gin.Context) {
+	userID := getUserID(c)
+	var req struct {
+		IDs []uint `json:"ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request")
+		return
 	}
 
+	var subs []model.Subscription
+	for _, id := range req.IDs {
+		sub, err := h.subSvc.Get(id, userID)
+		if err == nil {
+			subs = append(subs, *sub)
+		}
+	}
+
+	exported := h.exportSubs(subs)
+	c.Header("Content-Disposition", "attachment; filename=subforge-export.json")
+	c.Header("Content-Type", "application/json")
+	c.JSON(200, exported)
+}
+
+type ExportSub struct {
+	Name        string   `json:"name"`
+	URL         string   `json:"url"`
+	AutoRefresh int      `json:"auto_refresh"`
+	Tags        []string `json:"tags"`
+}
+
+func (h *ExportHandler) exportSubs(subs []model.Subscription) []ExportSub {
 	var exported []ExportSub
 	for _, s := range subs {
 		var tags []string
@@ -46,10 +77,7 @@ func (h *ExportHandler) Export(c *gin.Context) {
 			Tags:        tags,
 		})
 	}
-
-	c.Header("Content-Disposition", "attachment; filename=subforge-export.json")
-	c.Header("Content-Type", "application/json")
-	c.JSON(200, exported)
+	return exported
 }
 
 // Import imports subscriptions from JSON.
