@@ -305,6 +305,22 @@ def delete_subscription(sub_id: int, current_user: User = Depends(get_current_us
     db.commit()
     return {"message": "deleted"}
 
+@app.put("/api/subscriptions/{sub_id}")
+def update_subscription(sub_id: int, req: SubscriptionCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    sub.name = req.name
+    sub.url = req.url
+    sub.auto_refresh = req.auto_refresh or 3600
+    if req.tags:
+        import json as json_mod
+        sub.tags = json_mod.dumps(req.tags)
+
+    db.commit()
+    return {"id": sub.id, "name": sub.name, "url": sub.url}
+
 @app.post("/api/subscriptions/refresh-all")
 def refresh_all_subscriptions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
