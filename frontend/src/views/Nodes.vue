@@ -5,11 +5,11 @@
         <n-space justify="space-between" align="center">
           <n-space align="center">
             <span>节点管理</span>
-            <n-button type="primary" secondary :loading="speedTesting" @click="handleSpeedTest">
+            <n-button :loading="speedTesting" @click="handleSpeedTest">
               <template #icon><n-icon :component="SpeedometerOutline" /></template>
               测速
             </n-button>
-            <n-button type="success" @click="showExportModal = true" :disabled="!selectedSub">
+            <n-button @click="showExportModal = true" :disabled="!selectedSub">
               <template #icon><n-icon :component="LinkOutline" /></template>
               导出订阅
             </n-button>
