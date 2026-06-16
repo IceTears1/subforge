@@ -243,6 +243,213 @@ def delete_subscription(sub_id: int, current_user: User = Depends(get_current_us
     db.commit()
     return {"message": "deleted"}
 
+@app.post("/api/subscriptions/{sub_id}/refresh")
+def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    try:
+        # Fetch subscription content
+        import base64
+        import re
+
+        response = httpx.get(sub.url, timeout=30, follow_redirects=True)
+        content = response.text
+
+        # Try to decode base64
+        try:
+            decoded = base64.b64decode(content).decode('utf-8')
+        except:
+            decoded = content
+
+        # Parse nodes from decoded content
+        lines = decoded.strip().split('\n')
+        nodes = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Parse vless://, vmess://, trojan://, ss://, hysteria2://
+            if line.startswith('vless://'):
+                node = parse_vless(line)
+                if node:
+                    nodes.append(node)
+            elif line.startswith('vmess://'):
+                node = parse_vmess(line)
+                if node:
+                    nodes.append(node)
+            elif line.startswith('trojan://'):
+                node = parse_trojan(line)
+                if node:
+                    nodes.append(node)
+            elif line.startswith('ss://'):
+                node = parse_ss(line)
+                if node:
+                    nodes.append(node)
+            elif line.startswith('hysteria2://'):
+                node = parse_hysteria2(line)
+                if node:
+                    nodes.append(node)
+
+        # Delete old nodes
+        db.query(Node).filter(Node.subscription_id == sub.id).delete()
+
+        # Add new nodes
+        for node_data in nodes:
+            node = Node(
+                subscription_id=sub.id,
+                name=node_data.get('name', 'Unknown'),
+                display_name=node_data.get('name', 'Unknown'),
+                node_type=node_data.get('type', 'unknown'),
+                server=node_data.get('server', ''),
+                port=node_data.get('port', 0),
+                region=node_data.get('region', 'OTHER'),
+                config_json=node_data,
+                status=1
+            )
+            db.add(node)
+
+        # Update subscription
+        sub.node_count = len(nodes)
+        sub.last_fetch = datetime.utcnow()
+        db.commit()
+
+        return {"message": "refreshed", "node_count": len(nodes)}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
+
+def parse_vless(line: str) -> dict:
+    """Parse vless:// link"""
+    try:
+        # vless://uuid@server:port?params#name
+        match = re.match(r'vless://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
+        if match:
+            uuid, server, port, params, name = match.groups()
+            region = detect_region(server)
+            return {
+                'name': name,
+                'type': 'vless',
+                'server': server,
+                'port': int(port),
+                'region': region,
+                'uuid': uuid,
+                'params': params
+            }
+    except:
+        pass
+    return None
+
+def parse_vmess(line: str) -> dict:
+    """Parse vmess:// link"""
+    try:
+        # vmess://base64encoded
+        match = re.match(r'vmess://(.+)', line)
+        if match:
+            decoded = base64.b64decode(match.group(1)).decode('utf-8')
+            data = json.loads(decoded)
+            server = data.get('add', '')
+            port = int(data.get('port', 0))
+            name = data.get('ps', 'Unknown')
+            region = detect_region(server)
+            return {
+                'name': name,
+                'type': 'vmess',
+                'server': server,
+                'port': port,
+                'region': region,
+                'data': data
+            }
+    except:
+        pass
+    return None
+
+def parse_trojan(line: str) -> dict:
+    """Parse trojan:// link"""
+    try:
+        # trojan://password@server:port?params#name
+        match = re.match(r'trojan://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
+        if match:
+            password, server, port, params, name = match.groups()
+            region = detect_region(server)
+            return {
+                'name': name,
+                'type': 'trojan',
+                'server': server,
+                'port': int(port),
+                'region': region,
+                'password': password,
+                'params': params
+            }
+    except:
+        pass
+    return None
+
+def parse_ss(line: str) -> dict:
+    """Parse ss:// link"""
+    try:
+        # ss://base64encoded@server:port#name
+        match = re.match(r'ss://([^@]+)@([^:]+):(\d+)#(.+)', line)
+        if match:
+            encoded, server, port, name = match.groups()
+            region = detect_region(server)
+            return {
+                'name': name,
+                'type': 'ss',
+                'server': server,
+                'port': int(port),
+                'region': region
+            }
+    except:
+        pass
+    return None
+
+def parse_hysteria2(line: str) -> dict:
+    """Parse hysteria2:// link"""
+    try:
+        # hysteria2://auth@server:port?params#name
+        match = re.match(r'hysteria2://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
+        if match:
+            auth, server, port, params, name = match.groups()
+            region = detect_region(server)
+            return {
+                'name': name,
+                'type': 'hysteria2',
+                'server': server,
+                'port': int(port),
+                'region': region,
+                'auth': auth,
+                'params': params
+            }
+    except:
+        pass
+    return None
+
+def detect_region(server: str) -> str:
+    """Detect region from server address"""
+    server_lower = server.lower()
+    if 'hk' in server_lower or 'hongkong' in server_lower or 'hong kong' in server_lower:
+        return 'HK'
+    elif 'jp' in server_lower or 'japan' in server_lower:
+        return 'JP'
+    elif 'sg' in server_lower or 'singapore' in server_lower:
+        return 'SG'
+    elif 'us' in server_lower or 'usa' in server_lower or 'united states' in server_lower:
+        return 'US'
+    elif 'tw' in server_lower or 'taiwan' in server_lower:
+        return 'TW'
+    elif 'kr' in server_lower or 'korea' in server_lower:
+        return 'KR'
+    elif 'uk' in server_lower or 'united kingdom' in server_lower or 'britain' in server_lower:
+        return 'UK'
+    elif 'de' in server_lower or 'germany' in server_lower:
+        return 'DE'
+    else:
+        return 'OTHER'
+
 @app.get("/api/subscriptions/{sub_id}/nodes")
 def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
