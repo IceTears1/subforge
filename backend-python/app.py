@@ -3,6 +3,7 @@ import json
 import secrets
 import hashlib
 import re
+import yaml
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -302,32 +303,44 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
         lines = decoded.strip().split('\n')
         nodes = []
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
+        # Check if it's Clash YAML format (check both original and decoded)
+        is_clash_yaml = False
+        if 'proxies:' in content or 'proxy-providers:' in content:
+            is_clash_yaml = True
+            print("Detected Clash YAML format in original content")
+        elif 'proxies:' in decoded or 'proxy-providers:' in decoded:
+            is_clash_yaml = True
+            print("Detected Clash YAML format in decoded content")
 
+        if is_clash_yaml:
+            nodes = parse_clash_yaml(content)
+        else:
             # Parse vless://, vmess://, trojan://, ss://, hysteria2://
-            if line.startswith('vless://'):
-                node = parse_vless(line)
-                if node:
-                    nodes.append(node)
-            elif line.startswith('vmess://'):
-                node = parse_vmess(line)
-                if node:
-                    nodes.append(node)
-            elif line.startswith('trojan://'):
-                node = parse_trojan(line)
-                if node:
-                    nodes.append(node)
-            elif line.startswith('ss://'):
-                node = parse_ss(line)
-                if node:
-                    nodes.append(node)
-            elif line.startswith('hysteria2://'):
-                node = parse_hysteria2(line)
-                if node:
-                    nodes.append(node)
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+
+                if line.startswith('vless://'):
+                    node = parse_vless(line)
+                    if node:
+                        nodes.append(node)
+                elif line.startswith('vmess://'):
+                    node = parse_vmess(line)
+                    if node:
+                        nodes.append(node)
+                elif line.startswith('trojan://'):
+                    node = parse_trojan(line)
+                    if node:
+                        nodes.append(node)
+                elif line.startswith('ss://'):
+                    node = parse_ss(line)
+                    if node:
+                        nodes.append(node)
+                elif line.startswith('hysteria2://'):
+                    node = parse_hysteria2(line)
+                    if node:
+                        nodes.append(node)
 
         print(f"Parsed {len(nodes)} nodes from {len(lines)} lines")
 
@@ -490,6 +503,74 @@ def detect_region(server: str) -> str:
         return 'DE'
     else:
         return 'OTHER'
+
+def parse_clash_yaml(content: str) -> list:
+    """Parse Clash/Mihomo YAML subscription format"""
+    nodes = []
+    try:
+        data = yaml.safe_load(content)
+        if not data:
+            return nodes
+
+        # Parse proxies directly
+        if 'proxies' in data:
+            for proxy in data['proxies']:
+                proxy_type = proxy.get('type', '').lower()
+                name = proxy.get('name', 'Unknown')
+                server = proxy.get('server', '')
+                port = proxy.get('port', 0)
+
+                if not server or not port:
+                    continue
+
+                region = detect_region(server)
+                node = {
+                    'name': name,
+                    'type': proxy_type,
+                    'server': server,
+                    'port': int(port),
+                    'region': region,
+                    'data': proxy
+                }
+                nodes.append(node)
+
+        # Parse proxy-providers (fetch from URL)
+        if 'proxy-providers' in data:
+            for provider_name, provider in data['proxy-providers'].items():
+                provider_url = provider.get('url', '')
+                if provider_url:
+                    print(f"Fetching proxy-provider: {provider_name} from {provider_url}")
+                    try:
+                        provider_response = httpx.get(provider_url, timeout=30, follow_redirects=True)
+                        if provider_response.status_code == 200:
+                            provider_data = yaml.safe_load(provider_response.text)
+                            if provider_data and 'proxies' in provider_data:
+                                for proxy in provider_data['proxies']:
+                                    proxy_type = proxy.get('type', '').lower()
+                                    name = proxy.get('name', 'Unknown')
+                                    server = proxy.get('server', '')
+                                    port = proxy.get('port', 0)
+
+                                    if not server or not port:
+                                        continue
+
+                                    region = detect_region(server)
+                                    node = {
+                                        'name': name,
+                                        'type': proxy_type,
+                                        'server': server,
+                                        'port': int(port),
+                                        'region': region,
+                                        'data': proxy
+                                    }
+                                    nodes.append(node)
+                    except Exception as e:
+                        print(f"Failed to fetch provider {provider_name}: {e}")
+
+    except Exception as e:
+        print(f"Clash YAML parse error: {e}")
+
+    return nodes
 
 @app.get("/api/subscriptions/{sub_id}/nodes")
 def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
