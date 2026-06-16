@@ -743,6 +743,45 @@ def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_
     nodes = query.all()
     return [{"id": n.id, "name": n.name, "node_type": n.node_type, "server": n.server, "port": n.port, "region": n.region, "latency": n.latency} for n in nodes]
 
+@app.post("/api/subscriptions/{sub_id}/nodes/speedtest")
+def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+    results = []
+
+    for node in nodes:
+        try:
+            # Test TCP connection latency
+            import socket
+            import time
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)  # 3 second timeout
+            start_time = time.time()
+            result = sock.connect_ex((node.server, node.port))
+            end_time = time.time()
+            sock.close()
+
+            if result == 0:
+                latency = int((end_time - start_time) * 1000)  # Convert to ms
+                node.latency = latency
+                results.append({"id": node.id, "name": node.name, "latency": latency, "status": "success"})
+            else:
+                node.latency = -1
+                results.append({"id": node.id, "name": node.name, "latency": -1, "status": "failed"})
+
+        except Exception as e:
+            node.latency = -1
+            results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
+
+    # Save latency to database
+    db.commit()
+
+    return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
+
 @app.get("/api/formats")
 def list_formats():
     return {"formats": ["clash", "singbox", "surge", "loon", "quanx", "base64"]}

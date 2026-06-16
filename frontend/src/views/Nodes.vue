@@ -8,6 +8,10 @@
             <n-select v-model:value="selectedSub" :options="subOptions" placeholder="选择订阅" style="width: 200px" @update:value="loadNodes" />
             <n-select v-model:value="selectedRegion" :options="regionOptions" placeholder="区域筛选" clearable style="width: 140px" @update:value="filterNodes" />
             <n-input v-model:value="searchQuery" placeholder="搜索节点..." clearable style="width: 200px" @update:value="filterNodes" />
+            <n-button type="success" :loading="speedTesting" @click="handleSpeedTest">
+              <template #icon><n-icon :component="SpeedometerOutline" /></template>
+              一键测速
+            </n-button>
           </n-space>
         </n-space>
       </template>
@@ -33,11 +37,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { NCard, NDataTable, NSelect, NInput, NSpace, NTag } from 'naive-ui'
+import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon } from 'naive-ui'
+import { SpeedometerOutline } from '@vicons/ionicons5'
 import { getSubscriptions, getNodes } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
+const message = useMessage()
 const loading = ref(false)
+const speedTesting = ref(false)
 const subscriptions = ref<Subscription[]>([])
 const nodes = ref<Node[]>([])
 const filteredNodes = ref<Node[]>([])
@@ -126,6 +133,32 @@ function filterNodes() {
     )
   }
   filteredNodes.value = result
+}
+
+async function handleSpeedTest() {
+  if (!selectedSub.value) {
+    message.warning('请先选择订阅')
+    return
+  }
+
+  speedTesting.value = true
+  try {
+    const res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/speedtest`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    const data = await res.json()
+    if (data.results) {
+      const success = data.results.filter((r: any) => r.status === 'success').length
+      const failed = data.results.filter((r: any) => r.status !== 'success').length
+      message.success(`测速完成: ${success} 成功, ${failed} 失败`)
+      await loadNodes()  // Reload nodes to get updated latency
+    }
+  } catch (e: any) {
+    message.error('测速失败')
+  } finally {
+    speedTesting.value = false
+  }
 }
 
 onMounted(loadSubs)
