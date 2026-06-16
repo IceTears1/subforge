@@ -679,13 +679,28 @@ def parse_ss(line: str) -> dict:
             encoded, server, port, name = match.groups()
             from urllib.parse import unquote
             name = unquote(name)
+
+            # Decode base64 to get password and cipher
+            try:
+                decoded = base64.b64decode(encoded + '==').decode('utf-8')
+                if ':' in decoded:
+                    cipher, password = decoded.split(':', 1)
+                else:
+                    cipher = 'aes-256-gcm'
+                    password = decoded
+            except:
+                cipher = 'aes-256-gcm'
+                password = encoded
+
             region = detect_region(server)
             return {
                 'name': name,
                 'type': 'ss',
                 'server': server,
                 'port': int(port),
-                'region': region
+                'region': region,
+                'password': password,
+                'cipher': cipher
             }
         else:
             print(f"ss regex failed for: {line[:50]}")
@@ -1024,7 +1039,7 @@ def generate_clash_yaml(nodes: list) -> str:
                 proxy["skip-cert-verify"] = True
 
         elif node.node_type == "ss":
-            proxy["password"] = config_data.get("password", "")
+            proxy["password"] = config_data.get("password", "password")
             proxy["cipher"] = config_data.get("cipher", "aes-256-gcm")
             if config_data.get("udp"):
                 proxy["udp"] = True
