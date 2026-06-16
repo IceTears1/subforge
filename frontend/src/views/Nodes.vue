@@ -85,7 +85,7 @@ const columns = [
   {
     title: '延迟', key: 'latency', width: 80,
     render(row: Node) {
-      if (!row.latency) return '-'
+      if (!row.latency || row.latency < 0) return '-'
       const color = row.latency < 200 ? '#10b981' : row.latency < 500 ? '#f59e0b' : '#ef4444'
       return h('span', { style: { color } }, `${row.latency}ms`)
     },

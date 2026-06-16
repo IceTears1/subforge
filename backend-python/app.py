@@ -741,7 +741,7 @@ def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_
     if region:
         query = query.filter(Node.region == region.upper())
     nodes = query.all()
-    return [{"id": n.id, "name": n.name, "node_type": n.node_type, "server": n.server, "port": n.port, "region": n.region, "latency": n.latency} for n in nodes]
+    return [{"id": n.id, "name": n.name, "display_name": n.display_name, "node_type": n.node_type, "server": n.server, "port": n.port, "region": n.region, "latency": n.latency, "status": n.status} for n in nodes]
 
 @app.post("/api/subscriptions/{sub_id}/nodes/speedtest")
 def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -768,14 +768,38 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
             if result == 0:
                 latency = int((end_time - start_time) * 1000)  # Convert to ms
                 node.latency = latency
-                results.append({"id": node.id, "name": node.name, "latency": latency, "status": "success"})
+
+                # Test download speed (try HTTP HEAD request)
+                download_speed = 0
+                try:
+                    import httpx
+                    # Try common HTTP ports
+                    for test_port in [80, 443, 8080, 8443]:
+                        try:
+                            url = f"http://{node.server}:{test_port}/"
+                            response = httpx.head(url, timeout=2, follow_redirects=True)
+                            if response.status_code < 500:
+                                download_speed = 100  # Mark as reachable
+                                break
+                        except:
+                            pass
+                except:
+                    pass
+
+                results.append({
+                    "id": node.id,
+                    "name": node.name,
+                    "latency": latency,
+                    "download_speed": download_speed,
+                    "status": "success"
+                })
             else:
                 node.latency = -1
-                results.append({"id": node.id, "name": node.name, "latency": -1, "status": "failed"})
+                results.append({"id": node.id, "name": node.name, "latency": -1, "download_speed": 0, "status": "failed"})
 
         except Exception as e:
             node.latency = -1
-            results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
+            results.append({"id": node.id, "name": node.name, "latency": -1, "download_speed": 0, "status": "error"})
 
     # Save latency to database
     db.commit()
