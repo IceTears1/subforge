@@ -1,5 +1,5 @@
 #!/bin/bash
-# SubForge One-Click Installer (Python Version)
+# SubForge One-Click Installer (Pre-built Images)
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 
 set -euo pipefail
@@ -89,6 +89,18 @@ clone_repo() {
     fi
 }
 
+load_images() {
+    info "加载预构建镜像..."
+
+    # Load backend image
+    if [ -f "$INSTALL_DIR/images/subforge-backend.tar.gz" ]; then
+        docker load < "$INSTALL_DIR/images/subforge-backend.tar.gz"
+        log "后端镜像已加载"
+    else
+        warn "后端镜像不存在，将使用本地构建"
+    fi
+}
+
 generate_config() {
     info "生成配置..."
     cd "$INSTALL_DIR"
@@ -132,9 +144,7 @@ start_services() {
     cd "$INSTALL_DIR"
 
     docker compose down --remove-orphans 2>/dev/null || true
-
-    info "构建并启动 Docker 服务..."
-    docker compose up -d --build
+    docker compose up -d
 
     log "服务已启动"
 }
@@ -178,7 +188,7 @@ main() {
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本 (Python 版)${NC}"
+    echo -e "  ${BOLD}一键安装脚本 (预构建镜像版)${NC}"
     echo ""
 
     check_root
@@ -190,6 +200,7 @@ main() {
 
     # Setup project
     clone_repo
+    load_images
     generate_config
 
     # Build frontend
