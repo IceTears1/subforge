@@ -1,5 +1,5 @@
 #!/bin/bash
-# SubForge One-Click Installer (Pre-built Images)
+# SubForge One-Click Installer (Japan ECS Compatible)
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 
 set -euo pipefail
@@ -34,7 +34,14 @@ check_root() {
     fi
 }
 
-detect_arch() {
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_ID="${ID:-unknown}"
+    else
+        OS_ID="unknown"
+    fi
+
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64|amd64)  GOARCH="amd64" ;;
@@ -42,7 +49,8 @@ detect_arch() {
         armv7l)        GOARCH="arm" ;;
         *)             GOARCH="amd64" ;;
     esac
-    info "架构: $ARCH"
+
+    info "系统: $OS_ID ($ARCH)"
 }
 
 install_docker() {
@@ -52,7 +60,15 @@ install_docker() {
         return
     fi
     warn "安装 Docker..."
-    curl -fsSL https://get.docker.com | bash 2>/dev/null || error "Docker 安装失败"
+
+    # 使用国内镜像安装 Docker
+    if [ "$OS_ID" = "centos" ] || [ "$OS_ID" = "rhel" ]; then
+        yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+        yum install -y docker-ce docker-ce-cli containerd.io
+    else
+        curl -fsSL https://get.docker.com | bash 2>/dev/null || error "Docker 安装失败"
+    fi
+
     systemctl enable docker 2>/dev/null || true
     systemctl start docker 2>/dev/null || true
     log "Docker 安装完成"
@@ -130,6 +146,7 @@ build_frontend() {
     info "编译前端..."
     cd "$INSTALL_DIR/frontend"
 
+    # 使用国内 npm 镜像
     docker run --rm \
         -v "$(pwd):/app" \
         -w /app \
@@ -188,11 +205,11 @@ main() {
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本 (预构建镜像版)${NC}"
+    echo -e "  ${BOLD}一键安装脚本 (日本 ECS 兼容版)${NC}"
     echo ""
 
     check_root
-    detect_arch
+    detect_os
 
     # Install dependencies
     install_docker
