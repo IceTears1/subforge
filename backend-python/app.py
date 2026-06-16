@@ -257,32 +257,35 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
 
         # Try multiple times with increasing timeout
         content = None
-        for attempt in range(3):
-            try:
-                response = httpx.get(sub.url, timeout=60, follow_redirects=True)
-                # Accept both 200 and 403 (Cloudflare may return 403 with valid content)
-                if response.status_code in [200, 403]:
-                    content = response.text
-                    # Check if content is valid base64
-                    try:
-                        import base64 as b64
-                        decoded = b64.b64decode(content).decode('utf-8')
-                        if 'vless://' in decoded or 'vmess://' in decoded or 'ss://' in decoded:
-                            print(f"Attempt {attempt + 1}: Got valid content (HTTP {response.status_code})")
-                            break
-                        else:
-                            print(f"Attempt {attempt + 1}: Content not valid subscription data")
-                            content = None
-                    except:
-                        print(f"Attempt {attempt + 1}: Content not valid base64")
-                        content = None
-                else:
-                    print(f"Attempt {attempt + 1}: HTTP {response.status_code}")
-            except Exception as e:
-                print(f"Attempt {attempt + 1}: {e}")
-                if attempt < 2:
-                    import time
-                    time.sleep(2)
+
+        # Method 1: Try cloudscraper first (bypasses Cloudflare)
+        try:
+            import cloudscraper
+            print("Attempting cloudscraper...")
+            scraper = cloudscraper.create_scraper()
+            response = scraper.get(sub.url, timeout=60)
+            print(f"cloudscraper status: {response.status_code}")
+            if response.status_code == 200:
+                content = response.text
+                print(f"cloudscraper: Got content ({len(content)} bytes)")
+        except Exception as e:
+            print(f"cloudscraper failed: {e}")
+
+        # Method 2: Fallback to httpx
+        if content is None:
+            print("Falling back to httpx...")
+            for attempt in range(3):
+                try:
+                    response = httpx.get(sub.url, timeout=60, follow_redirects=True)
+                    print(f"httpx attempt {attempt + 1}: HTTP {response.status_code}")
+                    if response.status_code == 200:
+                        content = response.text
+                        break
+                except Exception as e:
+                    print(f"httpx attempt {attempt + 1}: {e}")
+                    if attempt < 2:
+                        import time
+                        time.sleep(2)
 
         if content is None:
             raise Exception("Failed to fetch subscription after 3 attempts")
