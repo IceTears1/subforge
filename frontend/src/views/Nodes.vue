@@ -3,11 +3,8 @@
     <n-card :bordered="false">
       <template #header>
         <n-space justify="space-between" align="center">
-          <span>节点管理</span>
-          <n-space>
-            <n-select v-model:value="selectedSub" :options="subOptions" placeholder="选择订阅" style="width: 200px" @update:value="loadNodes" />
-            <n-select v-model:value="selectedRegion" :options="regionOptions" placeholder="区域筛选" clearable style="width: 140px" @update:value="filterNodes" />
-            <n-input v-model:value="searchQuery" placeholder="搜索节点..." clearable style="width: 200px" @update:value="filterNodes" />
+          <n-space align="center">
+            <span>节点管理</span>
             <n-button type="primary" secondary :loading="speedTesting" @click="handleSpeedTest">
               <template #icon><n-icon :component="SpeedometerOutline" /></template>
               测速
@@ -16,6 +13,11 @@
               <template #icon><n-icon :component="LinkOutline" /></template>
               导出订阅
             </n-button>
+          </n-space>
+          <n-space>
+            <n-select v-model:value="selectedSub" :options="subOptions" placeholder="选择订阅" style="width: 200px" @update:value="loadNodes" />
+            <n-select v-model:value="selectedRegion" :options="regionOptions" placeholder="区域筛选" clearable style="width: 140px" @update:value="filterNodes" />
+            <n-input v-model:value="searchQuery" placeholder="搜索节点..." clearable style="width: 200px" @update:value="filterNodes" />
           </n-space>
         </n-space>
       </template>
@@ -79,7 +81,10 @@ const exportFormatOptions = [
   { label: '纯文本', value: 'text' },
 ]
 
-const subOptions = computed(() => subscriptions.value.map(s => ({ label: s.name, value: s.id })))
+const subOptions = computed(() => {
+  const options = subscriptions.value.map(s => ({ label: s.name, value: s.id }))
+  return [{ label: '全部订阅', value: '' }, ...options]
+})
 
 const regionOptions = [
   { label: '全部节点', value: '' },
@@ -146,11 +151,23 @@ async function loadSubs() {
 }
 
 async function loadNodes() {
-  if (!selectedSub.value) return
   loading.value = true
   try {
-    const res = await getNodes(selectedSub.value)
-    nodes.value = res.data || []
+    if (selectedSub.value === '' || selectedSub.value === null) {
+      // Load all nodes from all subscriptions
+      const allNodes: Node[] = []
+      for (const sub of subscriptions.value) {
+        try {
+          const res = await getNodes(sub.id)
+          const subNodes = (res.data || []).map((n: Node) => ({ ...n, subscription_name: sub.name }))
+          allNodes.push(...subNodes)
+        } catch {}
+      }
+      nodes.value = allNodes
+    } else {
+      const res = await getNodes(selectedSub.value)
+      nodes.value = res.data || []
+    }
     filterNodes()
   } catch {} finally { loading.value = false }
 }
