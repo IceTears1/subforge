@@ -8,9 +8,9 @@
             <n-select v-model:value="selectedSub" :options="subOptions" placeholder="选择订阅" style="width: 200px" @update:value="loadNodes" />
             <n-select v-model:value="selectedRegion" :options="regionOptions" placeholder="区域筛选" clearable style="width: 140px" @update:value="filterNodes" />
             <n-input v-model:value="searchQuery" placeholder="搜索节点..." clearable style="width: 200px" @update:value="filterNodes" />
-            <n-button type="success" :loading="speedTesting" @click="handleSpeedTest">
+            <n-button type="primary" secondary :loading="speedTesting" @click="handleSpeedTest">
               <template #icon><n-icon :component="SpeedometerOutline" /></template>
-              一键测速
+              测速
             </n-button>
           </n-space>
         </n-space>
