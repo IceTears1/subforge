@@ -1063,6 +1063,30 @@ def generate_clash_yaml(nodes: list) -> str:
                 proxy["obfs"] = config_data.get("obfs", config_data.get("data", {}).get("obfs", {}))
                 proxy["obfs-password"] = config_data.get("obfs-password", config_data.get("data", {}).get("obfs-password", ""))
 
+        elif node.node_type == "tuic":
+            # Check both direct and nested data field
+            password = config_data.get("password", "")
+            if not password and "data" in config_data:
+                password = config_data["data"].get("password", "")
+            proxy["password"] = password
+            proxy["udp-relay"] = True
+            if config_data.get("uuid"):
+                proxy["uuid"] = config_data["uuid"]
+            elif config_data.get("data", {}).get("uuid"):
+                proxy["uuid"] = config_data["data"]["uuid"]
+
+        elif node.node_type == "anytls":
+            # Check both direct and nested data field
+            password = config_data.get("password", "")
+            if not password and "data" in config_data:
+                password = config_data["data"].get("password", "")
+            proxy["password"] = password
+            proxy["udp"] = True
+            if config_data.get("sni"):
+                proxy["sni"] = config_data["sni"]
+            elif config_data.get("data", {}).get("sni"):
+                proxy["sni"] = config_data["data"]["sni"]
+
         proxies.append(proxy)
         proxy_names.append(name)
 
