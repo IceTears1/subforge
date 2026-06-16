@@ -245,6 +245,106 @@ def delete_subscription(sub_id: int, current_user: User = Depends(get_current_us
     db.commit()
     return {"message": "deleted"}
 
+@app.post("/api/subscriptions/refresh-all")
+def refresh_all_subscriptions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
+
+    results = []
+    for sub in subs:
+        try:
+            # Reuse the refresh logic
+            import base64
+            import re
+
+            # Fetch content
+            content = None
+            try:
+                import cloudscraper
+                scraper = cloudscraper.create_scraper()
+                response = scraper.get(sub.url, timeout=60)
+                if response.status_code == 200:
+                    content = response.text
+            except:
+                pass
+
+            if content is None:
+                for attempt in range(3):
+                    try:
+                        response = httpx.get(sub.url, timeout=60, follow_redirects=True)
+                        if response.status_code == 200:
+                            content = response.text
+                            break
+                    except:
+                        pass
+
+            if content is None:
+                results.append({"id": sub.id, "name": sub.name, "status": "failed", "node_count": 0})
+                continue
+
+            # Parse nodes
+            try:
+                decoded = base64.b64decode(content).decode('utf-8')
+            except:
+                decoded = content
+
+            # Check format
+            is_clash_yaml = 'proxies:' in content or 'proxy-providers:' in content
+            if is_clash_yaml:
+                nodes = parse_clash_yaml(content)
+            else:
+                nodes = []
+                for line in decoded.strip().split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith('vless://'):
+                        node = parse_vless(line)
+                        if node:
+                            nodes.append(node)
+                    elif line.startswith('vmess://'):
+                        node = parse_vmess(line)
+                        if node:
+                            nodes.append(node)
+                    elif line.startswith('trojan://'):
+                        node = parse_trojan(line)
+                        if node:
+                            nodes.append(node)
+                    elif line.startswith('ss://'):
+                        node = parse_ss(line)
+                        if node:
+                            nodes.append(node)
+                    elif line.startswith('hysteria2://'):
+                        node = parse_hysteria2(line)
+                        if node:
+                            nodes.append(node)
+
+            # Save to database
+            db.query(Node).filter(Node.subscription_id == sub.id).delete()
+            for node_data in nodes:
+                node = Node(
+                    subscription_id=sub.id,
+                    name=node_data.get('name', 'Unknown'),
+                    display_name=node_data.get('name', 'Unknown'),
+                    node_type=node_data.get('type', 'unknown'),
+                    server=node_data.get('server', ''),
+                    port=node_data.get('port', 0),
+                    region=node_data.get('region', 'OTHER'),
+                    config_json=node_data,
+                    status=1
+                )
+                db.add(node)
+
+            sub.node_count = len(nodes)
+            sub.last_fetch = datetime.utcnow()
+            db.commit()
+
+            results.append({"id": sub.id, "name": sub.name, "status": "success", "node_count": len(nodes)})
+
+        except Exception as e:
+            results.append({"id": sub.id, "name": sub.name, "status": "error", "error": str(e)})
+
+    return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
+
 @app.post("/api/subscriptions/{sub_id}/refresh")
 def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()

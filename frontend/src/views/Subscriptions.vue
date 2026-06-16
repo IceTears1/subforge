@@ -17,6 +17,10 @@
               </template>
               确认删除 {{ selectedIds.length }} 个订阅？
             </n-popconfirm>
+            <n-button type="success" :loading="refreshingAll" @click="handleRefreshAll">
+              <template #icon><n-icon :component="RefreshOutline" /></template>
+              一键刷新全部
+            </n-button>
             <n-button @click="showTemplate = true">
               <template #icon><n-icon :component="DocumentTextOutline" /></template>
               模板
@@ -141,6 +145,7 @@ const showImport = ref(false)
 const showDetail = ref(false)
 const detailSub = ref<Subscription | null>(null)
 const showTemplate = ref(false)
+const refreshingAll = ref(false)
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -268,6 +273,27 @@ async function handleSave() {
 async function handleRefresh(sub: Subscription) {
   try { await refreshSubscription(sub.id); message.success('刷新成功'); await load() }
   catch (e: any) { message.error(e.response?.data?.message || '刷新失败') }
+}
+
+async function handleRefreshAll() {
+  refreshingAll.value = true
+  try {
+    const res = await fetch('/api/subscriptions/refresh-all', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    const data = await res.json()
+    if (data.results) {
+      const success = data.results.filter((r: any) => r.status === 'success').length
+      const failed = data.results.filter((r: any) => r.status !== 'success').length
+      message.success(`刷新完成: ${success} 成功, ${failed} 失败`)
+    }
+    await load()
+  } catch (e: any) {
+    message.error('一键刷新失败')
+  } finally {
+    refreshingAll.value = false
+  }
 }
 
 async function handleDelete(sub: Subscription) {
