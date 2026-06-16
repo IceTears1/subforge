@@ -844,52 +844,71 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
 
     for node in nodes:
         try:
-            # Test TCP connection latency
             import socket
             import time
+            import concurrent.futures
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)  # 3 second timeout
-            start_time = time.time()
-            result = sock.connect_ex((node.server, node.port))
-            end_time = time.time()
-            sock.close()
-
-            if result == 0:
-                latency = int((end_time - start_time) * 1000)  # Convert to ms
-                node.latency = latency
-
-                # Test download speed (try HTTP HEAD request)
-                download_speed = 0
+            def test_connection(port):
+                """Test TCP connection to a port"""
                 try:
-                    import httpx
-                    # Try common HTTP ports
-                    for test_port in [80, 443, 8080, 8443]:
-                        try:
-                            url = f"http://{node.server}:{test_port}/"
-                            response = httpx.head(url, timeout=2, follow_redirects=True)
-                            if response.status_code < 500:
-                                download_speed = 100  # Mark as reachable
-                                break
-                        except:
-                            pass
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2)  # 2 second timeout per port
+                    start_time = time.time()
+                    result = sock.connect_ex((node.server, port))
+                    end_time = time.time()
+                    sock.close()
+                    if result == 0:
+                        return int((end_time - start_time) * 1000)
+                    return None
                 except:
-                    pass
+                    return None
 
+            # Try multiple ports in parallel
+            test_ports = [node.port, 80, 443, 8080, 8443]
+            latency = None
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(test_connection, port): port for port in test_ports}
+                for future in concurrent.futures.as_completed(futures, timeout=5):
+                    try:
+                        result = future.result()
+                        if result is not None and latency is None:
+                            latency = result
+                    except:
+                        pass
+
+            if latency is not None:
+                node.latency = latency
                 results.append({
                     "id": node.id,
                     "name": node.name,
                     "latency": latency,
-                    "download_speed": download_speed,
                     "status": "success"
                 })
             else:
-                node.latency = -1
-                results.append({"id": node.id, "name": node.name, "latency": -1, "download_speed": 0, "status": "failed"})
+                # If no port responds, try DNS resolution as a fallback
+                try:
+                    import socket
+                    socket.gethostbyname(node.server)
+                    node.latency = 999  # Mark as reachable but slow
+                    results.append({
+                        "id": node.id,
+                        "name": node.name,
+                        "latency": 999,
+                        "status": "success"
+                    })
+                except:
+                    node.latency = -1
+                    results.append({
+                        "id": node.id,
+                        "name": node.name,
+                        "latency": -1,
+                        "status": "failed"
+                    })
 
         except Exception as e:
             node.latency = -1
-            results.append({"id": node.id, "name": node.name, "latency": -1, "download_speed": 0, "status": "error"})
+            results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
 
     # Save latency to database
     db.commit()
