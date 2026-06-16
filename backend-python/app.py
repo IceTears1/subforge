@@ -899,27 +899,89 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
 def generate_clash_yaml(nodes: list) -> str:
     """Generate Clash/Mihomo YAML format"""
     import yaml
+    import json
+    import uuid
 
     proxies = []
     proxy_names = []
 
     for node in nodes:
+        # Get full config from database
+        if node.config_json:
+            try:
+                config_data = json.loads(node.config_json) if isinstance(node.config_json, str) else node.config_json
+            except:
+                config_data = {}
+        else:
+            config_data = {}
+
         proxy = {
             "name": node.name,
             "type": node.node_type,
             "server": node.server,
             "port": node.port,
         }
+
         if node.node_type == "vless":
+            proxy["uuid"] = config_data.get("uuid", str(uuid.uuid4()))
             proxy["udp"] = True
+            proxy["tls"] = config_data.get("tls", False)
+            if proxy["tls"]:
+                proxy["servername"] = config_data.get("servername", node.server)
+            # Network settings
+            network = config_data.get("net", "tcp")
+            if network == "ws":
+                proxy["network"] = "ws"
+                proxy["ws-opts"] = config_data.get("ws-opts", {"path": "/"})
+            elif network == "grpc":
+                proxy["network"] = "grpc"
+                proxy["grpc-opts"] = config_data.get("grpc-opts", {"grpc-service-name": ""})
+            # Reality settings
+            if config_data.get("flow"):
+                proxy["flow"] = config_data["flow"]
+            if config_data.get("reality-opts"):
+                proxy["reality-opts"] = config_data["reality-opts"]
+
         elif node.node_type == "vmess":
+            proxy["uuid"] = config_data.get("id", str(uuid.uuid4()))
+            proxy["alterId"] = config_data.get("aid", 0)
+            proxy["cipher"] = config_data.get("scy", "auto")
             proxy["udp"] = True
-            proxy["alterId"] = 0
-            proxy["cipher"] = "auto"
+            # Network settings
+            net = config_data.get("net", "tcp")
+            if net == "ws":
+                proxy["network"] = "ws"
+                proxy["ws-opts"] = config_data.get("ws-opts", {"path": "/"})
+            elif net == "grpc":
+                proxy["network"] = "grpc"
+                proxy["grpc-opts"] = config_data.get("grpc-opts", {"grpc-service-name": ""})
+            elif net == "h2":
+                proxy["network"] = "h2"
+                proxy["h2-opts"] = config_data.get("h2-opts", {})
+            # TLS settings
+            if config_data.get("tls"):
+                proxy["tls"] = True
+                proxy["servername"] = config_data.get("host", node.server)
+
         elif node.node_type == "trojan":
+            proxy["password"] = config_data.get("password", "")
             proxy["udp"] = True
+            proxy["sni"] = config_data.get("sni", node.server)
+            if config_data.get("skip-cert-verify"):
+                proxy["skip-cert-verify"] = True
+
         elif node.node_type == "ss":
-            proxy["cipher"] = "aes-256-gcm"
+            proxy["password"] = config_data.get("password", "")
+            proxy["cipher"] = config_data.get("cipher", "aes-256-gcm")
+            if config_data.get("udp"):
+                proxy["udp"] = True
+
+        elif node.node_type == "hysteria2":
+            proxy["password"] = config_data.get("password", "")
+            proxy["ports"] = config_data.get("ports", "")
+            if config_data.get("obfs"):
+                proxy["obfs"] = config_data["obfs"]
+                proxy["obfs-password"] = config_data.get("obfs-password", "")
 
         proxies.append(proxy)
         proxy_names.append(node.name)
@@ -930,14 +992,15 @@ def generate_clash_yaml(nodes: list) -> str:
             {
                 "name": "节点选择",
                 "type": "select",
-                "proxies": ["自动选择", "负载均衡"] + proxy_names
+                "proxies": ["自动选择", "负载均衡", "DIRECT"] + proxy_names
             },
             {
                 "name": "自动选择",
                 "type": "url-test",
                 "proxies": proxy_names,
                 "url": "http://www.gstatic.com/generate_204",
-                "interval": 300
+                "interval": 300,
+                "tolerance": 50
             },
             {
                 "name": "负载均衡",
