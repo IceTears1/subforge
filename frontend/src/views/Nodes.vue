@@ -12,6 +12,10 @@
               <template #icon><n-icon :component="SpeedometerOutline" /></template>
               测速
             </n-button>
+            <n-button type="success" @click="showExportModal = true" :disabled="!selectedSub">
+              <template #icon><n-icon :component="LinkOutline" /></template>
+              导出订阅
+            </n-button>
           </n-space>
         </n-space>
       </template>
@@ -32,25 +36,48 @@
         :scroll-x="800"
       />
     </n-card>
+
+    <!-- Export Modal -->
+    <n-modal v-model:show="showExportModal" preset="card" title="导出订阅地址" style="width: 500px">
+      <n-space vertical>
+        <n-text>选择导出格式：</n-text>
+        <n-select v-model:value="exportFormat" :options="exportFormatOptions" style="width: 100%" />
+        <n-text>订阅地址：</n-text>
+        <n-input :value="exportUrl" readonly type="textarea" :rows="3" />
+        <n-space>
+          <n-button @click="copyExportUrl">复制地址</n-button>
+          <n-button type="primary" @click="openExportUrl">在新窗口打开</n-button>
+        </n-space>
+      </n-space>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon } from 'naive-ui'
-import { SpeedometerOutline } from '@vicons/ionicons5'
+import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText } from 'naive-ui'
+import { SpeedometerOutline, LinkOutline } from '@vicons/ionicons5'
 import { getSubscriptions, getNodes } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
 const message = useMessage()
 const loading = ref(false)
 const speedTesting = ref(false)
+const showExportModal = ref(false)
+const exportFormat = ref('clash')
 const subscriptions = ref<Subscription[]>([])
 const nodes = ref<Node[]>([])
 const filteredNodes = ref<Node[]>([])
 const selectedSub = ref<number | null>(null)
 const selectedRegion = ref<string | null>(null)
 const searchQuery = ref('')
+
+const exportFormatOptions = [
+  { label: 'Clash/Mihomo', value: 'clash' },
+  { label: 'sing-box', value: 'singbox' },
+  { label: 'Base64', value: 'base64' },
+  { label: '纯文本', value: 'text' },
+]
 
 const subOptions = computed(() => subscriptions.value.map(s => ({ label: s.name, value: s.id })))
 
@@ -68,6 +95,14 @@ const regionOptions = [
 const onlineCount = computed(() => nodes.value.filter(n => n.status === 1).length)
 const offlineCount = computed(() => nodes.value.filter(n => n.status !== 1).length)
 const regionCount = computed(() => new Set(nodes.value.map(n => n.region).filter(Boolean)).size)
+
+const exportUrl = computed(() => {
+  if (!selectedSub.value) return ''
+  const sub = subscriptions.value.find(s => s.id === selectedSub.value)
+  if (!sub) return ''
+  const baseUrl = window.location.origin
+  return `${baseUrl}/sub/${sub.token}/export?target=${exportFormat.value}`
+})
 
 const columns = [
   { title: 'ID', key: 'id', width: 60 },
@@ -159,6 +194,15 @@ async function handleSpeedTest() {
   } finally {
     speedTesting.value = false
   }
+}
+
+function copyExportUrl() {
+  navigator.clipboard.writeText(exportUrl.value)
+  message.success('已复制到剪贴板')
+}
+
+function openExportUrl() {
+  window.open(exportUrl.value, '_blank')
 }
 
 onMounted(loadSubs)

@@ -857,6 +857,154 @@ def get_subscription_public(token: str, target: str = "clash", db: Session = Dep
     nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
     return {"subscription": sub.name, "nodes": len(nodes), "target": target}
 
+@app.get("/sub/{token}/export")
+def export_subscription(token: str, target: str = "clash", db: Session = Depends(get_db)):
+    sub = db.query(Subscription).filter(Subscription.token == token, Subscription.status == 1).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+
+    if target == "clash" or target == "mihomo":
+        # Generate Clash/Mihomo YAML format
+        yaml_content = generate_clash_yaml(nodes)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(yaml_content, media_type="text/yaml")
+    elif target == "singbox":
+        # Generate sing-box JSON format
+        json_content = generate_singbox_json(nodes)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(json_content, media_type="application/json")
+    elif target == "base64":
+        # Generate base64 encoded subscription
+        base64_content = generate_base64_subscription(nodes)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(base64_content, media_type="text/plain")
+    else:
+        # Default: return node list as text
+        lines = []
+        for node in nodes:
+            if node.node_type == "vless":
+                lines.append(f"vless://{node.server}:{node.port}")
+            elif node.node_type == "vmess":
+                lines.append(f"vmess://{node.server}:{node.port}")
+            elif node.node_type == "trojan":
+                lines.append(f"trojan://{node.server}:{node.port}")
+            elif node.node_type == "ss":
+                lines.append(f"ss://{node.server}:{node.port}")
+
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+
+def generate_clash_yaml(nodes: list) -> str:
+    """Generate Clash/Mihomo YAML format"""
+    import yaml
+
+    proxies = []
+    proxy_names = []
+
+    for node in nodes:
+        proxy = {
+            "name": node.name,
+            "type": node.node_type,
+            "server": node.server,
+            "port": node.port,
+        }
+        if node.node_type == "vless":
+            proxy["udp"] = True
+        elif node.node_type == "vmess":
+            proxy["udp"] = True
+            proxy["alterId"] = 0
+            proxy["cipher"] = "auto"
+        elif node.node_type == "trojan":
+            proxy["udp"] = True
+        elif node.node_type == "ss":
+            proxy["cipher"] = "aes-256-gcm"
+
+        proxies.append(proxy)
+        proxy_names.append(node.name)
+
+    config = {
+        "proxies": proxies,
+        "proxy-groups": [
+            {
+                "name": "节点选择",
+                "type": "select",
+                "proxies": ["自动选择", "负载均衡"] + proxy_names
+            },
+            {
+                "name": "自动选择",
+                "type": "url-test",
+                "proxies": proxy_names,
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300
+            },
+            {
+                "name": "负载均衡",
+                "type": "load-balance",
+                "proxies": proxy_names,
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300
+            }
+        ],
+        "rules": [
+            "GEOIP,CN,DIRECT",
+            "MATCH,节点选择"
+        ]
+    }
+
+    return yaml.dump(config, allow_unicode=True, default_flow_style=False)
+
+def generate_singbox_json(nodes: list) -> str:
+    """Generate sing-box JSON format"""
+    import json
+
+    outbounds = []
+    for node in nodes:
+        outbound = {
+            "type": node.node_type,
+            "tag": node.name,
+            "server": node.server,
+            "server_port": node.port,
+        }
+        if node.node_type == "vless":
+            outbound["flow"] = ""
+        elif node.node_type == "vmess":
+            outbound["security"] = "auto"
+        elif node.node_type == "trojan":
+            pass
+        elif node.node_type == "ss":
+            outbound["method"] = "aes-256-gcm"
+
+        outbounds.append(outbound)
+
+    config = {
+        "outbounds": [
+            {"type": "selector", "tag": "节点选择", "outbounds": ["自动选择"] + [n.name for n in nodes]},
+            {"type": "urltest", "tag": "自动选择", "outbounds": [n.name for n in nodes], "url": "http://www.gstatic.com/generate_204", "interval": "5m"}
+        ] + outbounds
+    }
+
+    return json.dumps(config, ensure_ascii=False, indent=2)
+
+def generate_base64_subscription(nodes: list) -> str:
+    """Generate base64 encoded subscription"""
+    import base64
+
+    lines = []
+    for node in nodes:
+        if node.node_type == "vless":
+            lines.append(f"vless://{node.server}:{node.port}")
+        elif node.node_type == "vmess":
+            lines.append(f"vmess://{node.server}:{node.port}")
+        elif node.node_type == "trojan":
+            lines.append(f"trojan://{node.server}:{node.port}")
+        elif node.node_type == "ss":
+            lines.append(f"ss://{node.server}:{node.port}")
+
+    content = "\n".join(lines)
+    return base64.b64encode(content.encode()).decode()
+
 @app.get("/api/metrics")
 def get_metrics(db: Session = Depends(get_db)):
     users = db.query(User).count()
