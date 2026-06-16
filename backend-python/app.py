@@ -948,6 +948,7 @@ def generate_clash_yaml(nodes: list) -> str:
 
     proxies = []
     proxy_names = []
+    name_count = {}
 
     for node in nodes:
         # Get full config from database
@@ -959,8 +960,16 @@ def generate_clash_yaml(nodes: list) -> str:
         else:
             config_data = {}
 
+        # Handle duplicate names by adding suffix
+        name = node.name
+        if name in name_count:
+            name_count[name] += 1
+            name = f"{name}_{name_count[name]}"
+        else:
+            name_count[name] = 1
+
         proxy = {
-            "name": node.name,
+            "name": name,
             "type": node.node_type,
             "server": node.server,
             "port": node.port,
@@ -1028,7 +1037,7 @@ def generate_clash_yaml(nodes: list) -> str:
                 proxy["obfs-password"] = config_data.get("obfs-password", "")
 
         proxies.append(proxy)
-        proxy_names.append(node.name)
+        proxy_names.append(name)
 
     config = {
         "proxies": proxies,
