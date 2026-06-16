@@ -539,6 +539,8 @@ def parse_vless(line: str) -> dict:
         match = re.match(r'vless://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
         if match:
             uuid, server, port, params, name = match.groups()
+            from urllib.parse import unquote
+            name = unquote(name)
             region = detect_region(server)
             return {
                 'name': name,
@@ -564,6 +566,8 @@ def parse_vmess(line: str) -> dict:
             server = data.get('add', '')
             port = int(data.get('port', 0))
             name = data.get('ps', 'Unknown')
+            from urllib.parse import unquote
+            name = unquote(name)
             region = detect_region(server)
             return {
                 'name': name,
@@ -586,6 +590,8 @@ def parse_trojan(line: str) -> dict:
         match = re.match(r'trojan://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
         if match:
             password, server, port, params, name = match.groups()
+            from urllib.parse import unquote
+            name = unquote(name)
             region = detect_region(server)
             return {
                 'name': name,
@@ -607,6 +613,8 @@ def parse_ss(line: str) -> dict:
         match = re.match(r'ss://([^@]+)@([^:]+):(\d+)#(.+)', line)
         if match:
             encoded, server, port, name = match.groups()
+            from urllib.parse import unquote
+            name = unquote(name)
             region = detect_region(server)
             return {
                 'name': name,
@@ -628,6 +636,8 @@ def parse_hysteria2(line: str) -> dict:
         match = re.match(r'hysteria2://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
         if match:
             auth, server, port, params, name = match.groups()
+            from urllib.parse import unquote
+            name = unquote(name)
             region = detect_region(server)
             return {
                 'name': name,
@@ -668,6 +678,7 @@ def parse_clash_yaml(content: str) -> list:
     """Parse Clash/Mihomo YAML subscription format"""
     nodes = []
     try:
+        from urllib.parse import unquote
         data = yaml.safe_load(content)
         if not data:
             return nodes
@@ -676,7 +687,7 @@ def parse_clash_yaml(content: str) -> list:
         if 'proxies' in data:
             for proxy in data['proxies']:
                 proxy_type = proxy.get('type', '').lower()
-                name = proxy.get('name', 'Unknown')
+                name = unquote(proxy.get('name', 'Unknown'))
                 server = proxy.get('server', '')
                 port = proxy.get('port', 0)
 
@@ -707,7 +718,7 @@ def parse_clash_yaml(content: str) -> list:
                             if provider_data and 'proxies' in provider_data:
                                 for proxy in provider_data['proxies']:
                                     proxy_type = proxy.get('type', '').lower()
-                                    name = proxy.get('name', 'Unknown')
+                                    name = unquote(proxy.get('name', 'Unknown'))
                                     server = proxy.get('server', '')
                                     port = proxy.get('port', 0)
 
