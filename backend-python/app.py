@@ -1010,24 +1010,27 @@ def generate_clash_yaml(nodes: list) -> str:
         }
 
         if node.node_type == "vless":
-            proxy["uuid"] = config_data.get("uuid", str(uuid.uuid4()))
+            # Check both direct and nested data field
+            proxy["uuid"] = config_data.get("uuid", config_data.get("data", {}).get("uuid", str(uuid.uuid4())))
             proxy["udp"] = True
-            proxy["tls"] = config_data.get("tls", False)
+            proxy["tls"] = config_data.get("tls", config_data.get("data", {}).get("tls", False))
             if proxy["tls"]:
-                proxy["servername"] = config_data.get("servername", node.server)
+                proxy["servername"] = config_data.get("servername", config_data.get("data", {}).get("servername", node.server))
             # Network settings
-            network = config_data.get("net", "tcp")
+            network = config_data.get("net", config_data.get("data", {}).get("net", "tcp"))
             if network == "ws":
                 proxy["network"] = "ws"
-                proxy["ws-opts"] = config_data.get("ws-opts", {"path": "/"})
+                proxy["ws-opts"] = config_data.get("ws-opts", config_data.get("data", {}).get("ws-opts", {"path": "/"}))
             elif network == "grpc":
                 proxy["network"] = "grpc"
-                proxy["grpc-opts"] = config_data.get("grpc-opts", {"grpc-service-name": ""})
+                proxy["grpc-opts"] = config_data.get("grpc-opts", config_data.get("data", {}).get("grpc-opts", {"grpc-service-name": ""}))
             # Reality settings
-            if config_data.get("flow"):
-                proxy["flow"] = config_data["flow"]
-            if config_data.get("reality-opts"):
-                proxy["reality-opts"] = config_data["reality-opts"]
+            flow = config_data.get("flow", config_data.get("data", {}).get("flow", ""))
+            if flow:
+                proxy["flow"] = flow
+            reality_opts = config_data.get("reality-opts", config_data.get("data", {}).get("reality-opts"))
+            if reality_opts:
+                proxy["reality-opts"] = reality_opts
 
         elif node.node_type == "vmess":
             proxy["uuid"] = config_data.get("id", str(uuid.uuid4()))
