@@ -1032,24 +1032,36 @@ def generate_clash_yaml(nodes: list) -> str:
                 proxy["servername"] = config_data.get("host", node.server)
 
         elif node.node_type == "trojan":
-            proxy["password"] = config_data.get("password", "")
+            # Check both direct and nested data field
+            password = config_data.get("password", "")
+            if not password and "data" in config_data:
+                password = config_data["data"].get("password", "")
+            proxy["password"] = password
             proxy["udp"] = True
-            proxy["sni"] = config_data.get("sni", node.server)
-            if config_data.get("skip-cert-verify"):
+            proxy["sni"] = config_data.get("sni", config_data.get("data", {}).get("sni", node.server))
+            if config_data.get("skip-cert-verify") or config_data.get("data", {}).get("skip-cert-verify"):
                 proxy["skip-cert-verify"] = True
 
         elif node.node_type == "ss":
-            proxy["password"] = config_data.get("password", "password")
-            proxy["cipher"] = config_data.get("cipher", "aes-256-gcm")
-            if config_data.get("udp"):
+            # Check both direct and nested data field
+            password = config_data.get("password", "")
+            if not password and "data" in config_data:
+                password = config_data["data"].get("password", "")
+            proxy["password"] = password or "password"
+            proxy["cipher"] = config_data.get("cipher", config_data.get("data", {}).get("cipher", "aes-256-gcm"))
+            if config_data.get("udp") or config_data.get("data", {}).get("udp"):
                 proxy["udp"] = True
 
         elif node.node_type == "hysteria2":
-            proxy["password"] = config_data.get("password", "")
-            proxy["ports"] = config_data.get("ports", "")
-            if config_data.get("obfs"):
-                proxy["obfs"] = config_data["obfs"]
-                proxy["obfs-password"] = config_data.get("obfs-password", "")
+            # Check both direct and nested data field
+            password = config_data.get("password", "")
+            if not password and "data" in config_data:
+                password = config_data["data"].get("password", "")
+            proxy["password"] = password
+            proxy["ports"] = config_data.get("ports", config_data.get("data", {}).get("ports", ""))
+            if config_data.get("obfs") or config_data.get("data", {}).get("obfs"):
+                proxy["obfs"] = config_data.get("obfs", config_data.get("data", {}).get("obfs", {}))
+                proxy["obfs-password"] = config_data.get("obfs-password", config_data.get("data", {}).get("obfs-password", ""))
 
         proxies.append(proxy)
         proxy_names.append(name)
