@@ -260,9 +260,22 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
         for attempt in range(3):
             try:
                 response = httpx.get(sub.url, timeout=60, follow_redirects=True)
-                if response.status_code == 200:
+                # Accept both 200 and 403 (Cloudflare may return 403 with valid content)
+                if response.status_code in [200, 403]:
                     content = response.text
-                    break
+                    # Check if content is valid base64
+                    try:
+                        import base64 as b64
+                        decoded = b64.b64decode(content).decode('utf-8')
+                        if 'vless://' in decoded or 'vmess://' in decoded or 'ss://' in decoded:
+                            print(f"Attempt {attempt + 1}: Got valid content (HTTP {response.status_code})")
+                            break
+                        else:
+                            print(f"Attempt {attempt + 1}: Content not valid subscription data")
+                            content = None
+                    except:
+                        print(f"Attempt {attempt + 1}: Content not valid base64")
+                        content = None
                 else:
                     print(f"Attempt {attempt + 1}: HTTP {response.status_code}")
             except Exception as e:
