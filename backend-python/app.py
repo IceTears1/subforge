@@ -285,8 +285,20 @@ def create_subscription(req: SubscriptionCreate, current_user: User = Depends(ge
     return {"id": sub.id, "name": sub.name, "token": sub.token}
 
 @app.get("/api/subscriptions/export-all")
-def export_all_subscriptions(target: str = "clash", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
+def export_all_subscriptions(target: str = "clash", token: str = None, db: Session = Depends(get_db)):
+    # Allow access with user token from query parameter
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            user_id = int(payload.get("sub"))
+        except:
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse("Invalid token", status_code=401)
+    else:
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("Token required", status_code=401)
+
+    subs = db.query(Subscription).filter(Subscription.user_id == user_id, Subscription.status == 1).all()
 
     all_nodes = []
     for sub in subs:

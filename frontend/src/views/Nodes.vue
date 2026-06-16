@@ -104,9 +104,10 @@ const regionCount = computed(() => new Set(nodes.value.map(n => n.region).filter
 
 const exportUrl = computed(() => {
   const baseUrl = window.location.origin
+  const userToken = localStorage.getItem('token') || ''
   if (selectedSub.value === '' || selectedSub.value === null) {
     // 全部订阅 - 使用 export-all 接口
-    return `${baseUrl}/api/subscriptions/export-all?target=${exportFormat.value}`
+    return `${baseUrl}/api/subscriptions/export-all?target=${exportFormat.value}&token=${userToken}`
   }
   const sub = subscriptions.value.find(s => s.id === selectedSub.value)
   if (!sub) return ''
