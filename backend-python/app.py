@@ -284,6 +284,42 @@ def create_subscription(req: SubscriptionCreate, current_user: User = Depends(ge
     db.refresh(sub)
     return {"id": sub.id, "name": sub.name, "token": sub.token}
 
+@app.get("/api/subscriptions/export-all")
+def export_all_subscriptions(target: str = "clash", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
+
+    all_nodes = []
+    for sub in subs:
+        nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+        all_nodes.extend(nodes)
+
+    if target == "clash" or target == "mihomo":
+        yaml_content = generate_clash_yaml(all_nodes)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(yaml_content, media_type="text/yaml")
+    elif target == "singbox":
+        json_content = generate_singbox_json(all_nodes)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(json_content, media_type="application/json")
+    elif target == "base64":
+        base64_content = generate_base64_subscription(all_nodes)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(base64_content, media_type="text/plain")
+    else:
+        lines = []
+        for node in all_nodes:
+            if node.node_type == "vless":
+                lines.append(f"vless://{node.server}:{node.port}")
+            elif node.node_type == "vmess":
+                lines.append(f"vmess://{node.server}:{node.port}")
+            elif node.node_type == "trojan":
+                lines.append(f"trojan://{node.server}:{node.port}")
+            elif node.node_type == "ss":
+                lines.append(f"ss://{node.server}:{node.port}")
+
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+
 @app.get("/api/subscriptions/{sub_id}")
 def get_subscription(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
@@ -866,22 +902,18 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
     nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
 
     if target == "clash" or target == "mihomo":
-        # Generate Clash/Mihomo YAML format
         yaml_content = generate_clash_yaml(nodes)
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(yaml_content, media_type="text/yaml")
     elif target == "singbox":
-        # Generate sing-box JSON format
         json_content = generate_singbox_json(nodes)
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(json_content, media_type="application/json")
     elif target == "base64":
-        # Generate base64 encoded subscription
         base64_content = generate_base64_subscription(nodes)
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(base64_content, media_type="text/plain")
     else:
-        # Default: return node list as text
         lines = []
         for node in nodes:
             if node.node_type == "vless":
