@@ -82,6 +82,7 @@ const exportFormatOptions = [
 const subOptions = computed(() => subscriptions.value.map(s => ({ label: s.name, value: s.id })))
 
 const regionOptions = [
+  { label: '全部节点', value: '' },
   { label: '🇭🇰 HK', value: 'HK' },
   { label: '🇯🇵 JP', value: 'JP' },
   { label: '🇸🇬 SG', value: 'SG' },
