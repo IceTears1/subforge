@@ -2,6 +2,7 @@ import os
 import json
 import secrets
 import hashlib
+import re
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -254,8 +255,26 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
         import base64
         import re
 
-        response = httpx.get(sub.url, timeout=30, follow_redirects=True)
-        content = response.text
+        # Try multiple times with increasing timeout
+        content = None
+        for attempt in range(3):
+            try:
+                response = httpx.get(sub.url, timeout=60, follow_redirects=True)
+                if response.status_code == 200:
+                    content = response.text
+                    break
+                else:
+                    print(f"Attempt {attempt + 1}: HTTP {response.status_code}")
+            except Exception as e:
+                print(f"Attempt {attempt + 1}: {e}")
+                if attempt < 2:
+                    import time
+                    time.sleep(2)
+
+        if content is None:
+            raise Exception("Failed to fetch subscription after 3 attempts")
+
+        print(f"Fetched content length: {len(content)}")
 
         # Try to decode base64
         try:
@@ -293,6 +312,8 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
                 node = parse_hysteria2(line)
                 if node:
                     nodes.append(node)
+
+        print(f"Parsed {len(nodes)} nodes from {len(lines)} lines")
 
         # Delete old nodes
         db.query(Node).filter(Node.subscription_id == sub.id).delete()
@@ -363,8 +384,10 @@ def parse_vmess(line: str) -> dict:
                 'region': region,
                 'data': data
             }
-    except:
-        pass
+        else:
+            print(f"vmess regex failed for: {line[:50]}")
+    except Exception as e:
+        print(f"vmess parse error: {e}")
     return None
 
 def parse_trojan(line: str) -> dict:
@@ -403,8 +426,10 @@ def parse_ss(line: str) -> dict:
                 'port': int(port),
                 'region': region
             }
-    except:
-        pass
+        else:
+            print(f"ss regex failed for: {line[:50]}")
+    except Exception as e:
+        print(f"ss parse error: {e}")
     return None
 
 def parse_hysteria2(line: str) -> dict:
