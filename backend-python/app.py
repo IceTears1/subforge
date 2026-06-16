@@ -197,6 +197,66 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 def get_me(current_user: User = Depends(get_current_user)):
     return {"id": current_user.id, "username": current_user.username, "role": current_user.role}
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+@app.get("/api/users")
+def list_users(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return [{"id": u.id, "username": u.username, "role": u.role, "status": u.status, "created_at": str(u.created_at)} for u in users]
+
+@app.post("/api/users")
+def create_user(req: UserCreate, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    # Check if username exists
+    existing = db.query(User).filter(User.username == req.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    user = User(
+        username=req.username,
+        password=get_password_hash(req.password),
+        role=req.role,
+        status=1
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username, "role": user.role}
+
+@app.put("/api/users/{user_id}/status")
+def update_user_status(user_id: int, status: int = 1, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.status = status
+    db.commit()
+    return {"message": "updated"}
+
+@app.put("/api/users/{user_id}/password")
+def reset_user_password(user_id: int, password: str = "", current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not password:
+        import secrets
+        password = secrets.token_urlsafe(16)
+    user.password = get_password_hash(password)
+    db.commit()
+    return {"message": "updated", "password": password}
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(user)
+    db.commit()
+    return {"message": "deleted"}
+
 @app.get("/api/subscriptions")
 def list_subscriptions(page: int = 1, page_size: int = 20, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     total = db.query(Subscription).filter(Subscription.user_id == current_user.id).count()
