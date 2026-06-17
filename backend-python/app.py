@@ -73,6 +73,15 @@ class Node(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     subscription = relationship("Subscription", back_populates="nodes")
 
+class APIKey(Base):
+    __tablename__ = "api_keys"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    name = Column(String(128))
+    key = Column(String(64), unique=True, index=True)
+    status = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # ─── Create tables ────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
@@ -254,6 +263,41 @@ def delete_user(user_id: int, current_user: User = Depends(require_admin), db: S
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     db.delete(user)
+    db.commit()
+    return {"message": "deleted"}
+
+class APIKeyCreate(BaseModel):
+    name: str
+
+@app.get("/api/apikeys")
+def list_apikeys(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    apikeys = db.query(APIKey).filter(APIKey.user_id == current_user.id).all()
+    return [{"id": k.id, "name": k.name, "key": k.key[:8] + "...", "status": k.status, "created_at": str(k.created_at)} for k in apikeys]
+
+@app.post("/api/apikeys")
+def create_apikey(req: APIKeyCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Generate API key
+    import secrets
+    api_key = f"sf_{secrets.token_urlsafe(32)}"
+
+    key = APIKey(
+        user_id=current_user.id,
+        name=req.name,
+        key=api_key,
+        status=1
+    )
+    db.add(key)
+    db.commit()
+    db.refresh(key)
+
+    return {"id": key.id, "name": key.name, "key": api_key}
+
+@app.delete("/api/apikeys/{key_id}")
+def delete_apikey(key_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    key = db.query(APIKey).filter(APIKey.id == key_id, APIKey.user_id == current_user.id).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    db.delete(key)
     db.commit()
     return {"message": "deleted"}
 
