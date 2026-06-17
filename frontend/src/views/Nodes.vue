@@ -26,7 +26,6 @@
             type="primary"
             size="large"
             :loading="speedTesting"
-            :disabled="selectedSub === ''"
             @click="handleSpeedTest"
             style="font-weight: 600; min-width: 140px;"
           >
@@ -241,17 +240,22 @@ function filterNodes() {
 }
 
 async function handleSpeedTest() {
-  if (selectedSub.value === '' || selectedSub.value === null) {
-    message.warning('测速需要选择具体订阅')
-    return
-  }
-
   speedTesting.value = true
   try {
-    const res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/speedtest`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
+    let res
+    if (selectedSub.value && selectedSub.value !== '') {
+      // Test specific subscription
+      res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/speedtest`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+    } else {
+      // Test all nodes
+      res = await fetch(`/api/nodes/speedtest-all`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+    }
     const data = await res.json()
     if (data.results) {
       const success = data.results.filter((r: any) => r.status === 'success').length

@@ -1044,6 +1044,90 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
 
     return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
 
+@app.post("/api/nodes/speedtest-all")
+def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Test latency for all nodes across all subscriptions"""
+    # Get all subscriptions for the current user
+    subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
+    sub_ids = [s.id for s in subs]
+
+    if not sub_ids:
+        return {"results": [], "total": 0, "success": 0}
+
+    # Get all nodes
+    nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
+    results = []
+
+    for node in nodes:
+        try:
+            import socket
+            import time
+            import concurrent.futures
+
+            def test_connection(port):
+                """Test TCP connection to a port"""
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2)
+                    start_time = time.time()
+                    result = sock.connect_ex((node.server, port))
+                    end_time = time.time()
+                    sock.close()
+                    if result == 0:
+                        return int((end_time - start_time) * 1000)
+                    return None
+                except:
+                    return None
+
+            test_ports = [node.port, 80, 443, 8080, 8443]
+            latency = None
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(test_connection, port): port for port in test_ports}
+                for future in concurrent.futures.as_completed(futures, timeout=5):
+                    try:
+                        result = future.result()
+                        if result is not None and latency is None:
+                            latency = result
+                    except:
+                        pass
+
+            if latency is not None:
+                node.latency = latency
+                results.append({
+                    "id": node.id,
+                    "name": node.name,
+                    "latency": latency,
+                    "status": "success"
+                })
+            else:
+                try:
+                    socket.gethostbyname(node.server)
+                    node.latency = 999
+                    results.append({
+                        "id": node.id,
+                        "name": node.name,
+                        "latency": 999,
+                        "status": "success"
+                    })
+                except:
+                    node.latency = -1
+                    results.append({
+                        "id": node.id,
+                        "name": node.name,
+                        "latency": -1,
+                        "status": "failed"
+                    })
+
+        except Exception as e:
+            node.latency = -1
+            results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
+
+    # Save latency to database
+    db.commit()
+
+    return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
+
 @app.get("/api/formats")
 def list_formats():
     return {"formats": ["clash", "singbox", "surge", "loon", "quanx", "base64"]}
