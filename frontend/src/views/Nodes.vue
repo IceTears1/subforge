@@ -22,33 +22,15 @@
           <n-tag :bordered="false" type="info">区域: {{ regionCount }}</n-tag>
         </n-space>
         <n-space>
-          <n-button-group>
-            <n-button
-              type="primary"
-              :loading="speedTesting"
-              :disabled="selectedSub === ''"
-              @click="handleSpeedTestType('latency')"
-            >
-              <template #icon><n-icon :component="SpeedometerOutline" /></template>
-              {{ speedTesting ? '测速中...' : '延迟测试' }}
-            </n-button>
-            <n-button
-              type="info"
-              :loading="speedTesting"
-              :disabled="selectedSub === ''"
-              @click="handleSpeedTestType('direct')"
-            >
-              直接下载
-            </n-button>
-            <n-button
-              type="warning"
-              :loading="speedTesting"
-              :disabled="selectedSub === ''"
-              @click="handleSpeedTestType('proxy')"
-            >
-              代理下载
-            </n-button>
-          </n-button-group>
+          <n-button
+            type="primary"
+            :loading="speedTesting"
+            :disabled="selectedSub === ''"
+            @click="handleSpeedTest"
+          >
+            <template #icon><n-icon :component="SpeedometerOutline" /></template>
+            {{ speedTesting ? '测速中...' : '一键测速' }}
+          </n-button>
           <n-button
             type="success"
             @click="showExportModal = true"
@@ -115,7 +97,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText, NGrid, NGi, NButtonGroup } from 'naive-ui'
+import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText, NGrid, NGi } from 'naive-ui'
 import { SpeedometerOutline, DownloadOutline, CopyOutline, OpenOutline } from '@vicons/ionicons5'
 import QRCodeVue3 from 'qrcode.vue'
 import { getSubscriptions, getNodes } from '../api/subscription'
@@ -200,24 +182,6 @@ const columns = [
     },
   },
   {
-    title: '下载速度', key: 'download_speed', width: 100,
-    render(row: Node) {
-      if (!row.download_speed || row.download_speed <= 0) return '-'
-      const speed = row.download_speed
-      let text = ''
-      let color = '#666'
-      if (speed >= 1024) {
-        text = `${(speed / 1024).toFixed(1)} MB/s`
-        color = '#10b981'
-      } else {
-        text = `${speed.toFixed(0)} KB/s`
-        color = speed >= 200 ? '#f59e0b' : '#ef4444'
-      }
-      const typeTag = row.download_speed_type === 'proxy' ? ' [代理]' : ' [直连]'
-      return h('span', { style: { color } }, text + typeTag)
-    },
-  },
-  {
     title: '状态', key: 'status', width: 60,
     render(row: Node) {
       return h(NTag, { type: row.status === 1 ? 'success' : 'error', size: 'small', bordered: false }, { default: () => row.status === 1 ? '在线' : '离线' })
@@ -272,20 +236,12 @@ function filterNodes() {
   filteredNodes.value = result
 }
 
-async function handleSpeedTestType(key: string) {
+async function handleSpeedTest() {
   if (selectedSub.value === '' || selectedSub.value === null) {
     message.warning('测速需要选择具体订阅')
     return
   }
 
-  if (key === 'latency') {
-    await handleLatencyTest()
-  } else {
-    await handleDownloadTest(key)
-  }
-}
-
-async function handleLatencyTest() {
   speedTesting.value = true
   try {
     const res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/speedtest`, {
@@ -296,33 +252,11 @@ async function handleLatencyTest() {
     if (data.results) {
       const success = data.results.filter((r: any) => r.status === 'success').length
       const failed = data.results.filter((r: any) => r.status !== 'success').length
-      message.success(`延迟测试完成: ${success} 成功, ${failed} 失败`)
+      message.success(`测速完成: ${success} 成功, ${failed} 失败`)
       await loadNodes()
     }
   } catch (e: any) {
-    message.error('延迟测试失败')
-  } finally {
-    speedTesting.value = false
-  }
-}
-
-async function handleDownloadTest(speedType: string) {
-  speedTesting.value = true
-  const typeLabel = speedType === 'proxy' ? '代理下载' : '直接下载'
-  try {
-    const res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/download-speedtest?speed_type=${speedType}`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    })
-    const data = await res.json()
-    if (data.results) {
-      const success = data.results.filter((r: any) => r.status === 'success').length
-      const failed = data.results.filter((r: any) => r.status !== 'success').length
-      message.success(`${typeLabel}测速完成: ${success} 成功, ${failed} 失败`)
-      await loadNodes()
-    }
-  } catch (e: any) {
-    message.error(`${typeLabel}测速失败`)
+    message.error('测速失败')
   } finally {
     speedTesting.value = false
   }

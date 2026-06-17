@@ -19,5 +19,4 @@ RUN echo "${VERSION}" > /app/VERSION && \
 
 EXPOSE 8081
 
-# Run migration on startup
-CMD ["sh", "-c", "python migrate_add_download_speed.py && python app.py"]
+CMD ["python", "app.py"]
