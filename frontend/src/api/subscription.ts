@@ -18,6 +18,7 @@ export interface Subscription {
 export interface Node {
   id: number
   subscription_id: number
+  subscription_name?: string
   name: string
   display_name: string
   node_type: string
@@ -54,6 +55,10 @@ export function refreshSubscription(id: number) {
 
 export function getNodes(subId: number, region?: string) {
   return api.get<Node[]>(`/subscriptions/${subId}/nodes`, { params: { region } })
+}
+
+export function getAllNodes() {
+  return api.get<Node[]>('/nodes/all')
 }
 
 export function convertSub(sourceUrl: string, target: string, options?: Record<string, any>) {

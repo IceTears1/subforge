@@ -5,8 +5,7 @@
         <n-space justify="space-between" align="center">
           <span>节点分组</span>
           <n-space>
-            <n-select v-model:value="selectedSub" :options="subOptions" placeholder="选择订阅" style="width: 200px" @update:value="loadNodes" />
-            <n-select v-model:value="groupBy" :options="groupOptions" placeholder="分组方式" style="width: 140px" @update:value="regroup" />
+            <n-select v-model:value="groupBy" :options="groupOptions" placeholder="分组方式" style="width: 140px" />
           </n-space>
         </n-space>
       </template>
@@ -39,7 +38,8 @@
         </n-gi>
       </n-grid>
 
-      <n-empty v-if="groups.length === 0" description="请选择订阅和分组方式" style="padding: 40px 0" />
+      <n-empty v-if="groups.length === 0 && !loading" description="暂无节点数据" style="padding: 40px 0" />
+      <n-spin :show="loading" style="padding: 40px 0" description="加载中..." />
     </n-card>
 
     <!-- Export Modal -->
@@ -53,55 +53,48 @@
             <n-text strong>导出格式</n-text>
             <n-select v-model:value="exportFormat" :options="exportFormatOptions" />
 
-            <n-text strong>订阅地址</n-text>
-            <n-input :value="exportUrl" readonly type="textarea" :rows="4" style="font-family: monospace; font-size: 12px;" />
-
-            <n-space>
-              <n-button @click="copyExportUrl" type="primary">
-                <template #icon><n-icon :component="CopyOutline" /></template>
-                复制地址
-              </n-button>
-              <n-button @click="openExportUrl">
-                <template #icon><n-icon :component="OpenOutline" /></template>
-                打开链接
-              </n-button>
-            </n-space>
+            <n-text strong>说明</n-text>
+            <n-alert type="info" style="font-size: 12px;">
+              导出的订阅包含当前分组中的所有节点，可直接导入到 Clash/sing-box 等客户端
+            </n-alert>
           </n-space>
         </n-gi>
         <n-gi>
           <n-space vertical align="center">
-            <n-text strong>二维码</n-text>
-            <n-card :bordered="false" style="width: 200px;">
-              <div style="display: flex; justify-content: center;">
-                <QRCodeVue3
-                  :value="exportUrl"
-                  :size="180"
-                  :dots-options="{ type: 'rounded', color: '#000000' }"
-                  :corners-square-options="{ type: 'extra-rounded' }"
-                />
-              </div>
-            </n-card>
-            <n-text depth="3" style="font-size: 12px;">扫描二维码导入订阅</n-text>
+            <n-text strong>支持的客户端</n-text>
+            <n-space>
+              <n-tag>Clash</n-tag>
+              <n-tag>Mihomo</n-tag>
+              <n-tag>sing-box</n-tag>
+              <n-tag>Surge</n-tag>
+            </n-space>
           </n-space>
         </n-gi>
       </n-grid>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showExportModal = false">关闭</n-button>
+          <n-button type="primary" @click="exportCurrentGroup">
+            <template #icon><n-icon :component="DownloadOutline" /></template>
+            导出配置文件
+          </n-button>
+        </n-space>
+      </template>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { NCard, NSelect, NGrid, NGi, NDataTable, NTag, NSpace, NEmpty, NButton, NIcon, NModal, NText, NInput, useMessage } from 'naive-ui'
+import { NCard, NSelect, NGrid, NGi, NDataTable, NTag, NSpace, NEmpty, NButton, NIcon, NModal, NText, NInput, NAlert, NSpin, useMessage } from 'naive-ui'
 import { DownloadOutline, CopyOutline, OpenOutline } from '@vicons/ionicons5'
-import QRCodeVue3 from 'qrcode.vue'
-import { getSubscriptions, getNodes } from '../api/subscription'
-import type { Subscription, Node } from '../api/subscription'
+import { getAllNodes } from '../api/subscription'
+import type { Node } from '../api/subscription'
 
 const message = useMessage()
 const isMobile = ref(window.innerWidth <= 768)
-const subscriptions = ref<Subscription[]>([])
 const nodes = ref<Node[]>([])
-const selectedSub = ref<number | null>(null)
+const loading = ref(false)
 const groupBy = ref('region')
 
 // Export modal state
@@ -109,19 +102,17 @@ const showExportModal = ref(false)
 const exportGroup = ref<NodeGroup | null>(null)
 const exportFormat = ref('clash')
 
-const subOptions = computed(() => subscriptions.value.map(s => ({ label: s.name, value: s.id, token: s.token })))
-
 const groupOptions = [
   { label: '按区域', value: 'region' },
   { label: '按协议', value: 'type' },
   { label: '按状态', value: 'status' },
+  { label: '按订阅来源', value: 'subscription' },
 ]
 
 const exportFormatOptions = [
-  { label: 'Clash / Mihomo', value: 'clash' },
-  { label: 'sing-box', value: 'singbox' },
+  { label: 'Clash / Mihomo (YAML)', value: 'clash' },
+  { label: 'sing-box (JSON)', value: 'singbox' },
   { label: 'Base64', value: 'base64' },
-  { label: '纯文本', value: 'plain' },
 ]
 
 const regionEmoji: Record<string, string> = {
@@ -131,12 +122,13 @@ const regionEmoji: Record<string, string> = {
 }
 
 const nodeColumns = [
-  { title: '名称', key: 'display_name', width: 180, ellipsis: { tooltip: true } },
-  { title: '类型', key: 'node_type', width: 80 },
-  { title: '地址', key: 'server', width: 150, ellipsis: { tooltip: true } },
-  { title: '端口', key: 'port', width: 70 },
+  { title: '名称', key: 'display_name', width: 150, ellipsis: { tooltip: true } },
+  { title: '类型', key: 'node_type', width: 70 },
+  { title: '地址', key: 'server', width: 130, ellipsis: { tooltip: true } },
+  { title: '端口', key: 'port', width: 60 },
+  { title: '来源', key: 'subscription_name', width: 100, ellipsis: { tooltip: true } },
   {
-    title: '延迟', key: 'latency', width: 80,
+    title: '延迟', key: 'latency', width: 70,
     render(row: Node) {
       if (!row.latency) return '-'
       const color = row.latency < 200 ? '#10b981' : row.latency < 500 ? '#f59e0b' : '#ef4444'
@@ -166,6 +158,9 @@ const groups = computed<NodeGroup[]>(() => {
       case 'status':
         key = node.status === 1 ? '在线' : '离线'
         break
+      case 'subscription':
+        key = node.subscription_name || '未知来源'
+        break
       default:
         key = 'all'
     }
@@ -182,22 +177,6 @@ const groups = computed<NodeGroup[]>(() => {
     .sort((a, b) => b.nodes.length - a.nodes.length)
 })
 
-const exportUrl = computed(() => {
-  if (!exportGroup.value || !selectedSub.value) return ''
-
-  const sub = subscriptions.value.find(s => s.id === selectedSub.value)
-  if (!sub || !sub.token) return ''
-
-  const origin = window.location.origin
-  const params = new URLSearchParams({
-    target: exportFormat.value,
-    group_by: groupBy.value,
-    group_value: exportGroup.value.name,
-  })
-
-  return `${origin}/sub/${sub.token}/export/group?${params.toString()}`
-})
-
 function getGroupEmoji(name: string): string {
   const emojiMap: Record<string, string> = {
     vmess: '🔷', vless: '🟢', trojan: '🟡', ss: '🔴', ssr: '🟣',
@@ -212,41 +191,132 @@ function openExportModal(group: NodeGroup) {
   showExportModal.value = true
 }
 
-function copyExportUrl() {
-  if (!exportUrl.value) return
-  navigator.clipboard.writeText(exportUrl.value).then(() => {
-    message.success('订阅地址已复制')
-  }).catch(() => {
-    message.error('复制失败')
+function exportCurrentGroup() {
+  if (!exportGroup.value) return
+
+  // Generate subscription content based on format
+  const groupNodes = exportGroup.value.nodes
+  let content = ''
+  let filename = ''
+  let mimeType = ''
+
+  if (exportFormat.value === 'clash') {
+    content = generateClashYaml(groupNodes)
+    filename = `subforge_${exportGroup.value.name}.yaml`
+    mimeType = 'text/yaml'
+  } else if (exportFormat.value === 'singbox') {
+    content = generateSingboxJson(groupNodes)
+    filename = `subforge_${exportGroup.value.name}.json`
+    mimeType = 'application/json'
+  } else {
+    content = generateBase64(groupNodes)
+    filename = `subforge_${exportGroup.value.name}.txt`
+    mimeType = 'text/plain'
+  }
+
+  // Download file
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+
+  message.success(`已导出 ${exportGroup.value.name} (${groupNodes.length} 个节点)`)
+  showExportModal.value = false
+}
+
+function generateClashYaml(nodes: Node[]): string {
+  const proxies = nodes.map(node => {
+    const base: any = {
+      name: node.display_name || node.name,
+      type: node.node_type,
+      server: node.server,
+      port: node.port,
+    }
+    return base
   })
+
+  const proxyNames = proxies.map(p => p.name)
+
+  return `# SubForge 导出
+# 分组: ${exportGroup.value?.name}
+# 节点数: ${nodes.length}
+
+proxies:
+${proxies.map(p => `  - name: ${p.name}\n    type: ${p.type}\n    server: ${p.server}\n    port: ${p.port}`).join('\n')}
+
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+${proxyNames.map(n => `      - ${n}`).join('\n')}
+
+  - name: 自动选择
+    type: url-test
+    proxies:
+${proxyNames.map(n => `      - ${n}`).join('\n')}
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+
+rules:
+  - MATCH,节点选择
+`
 }
 
-function openExportUrl() {
-  if (!exportUrl.value) return
-  window.open(exportUrl.value, '_blank')
+function generateSingboxJson(nodes: Node[]): string {
+  const outbounds = nodes.map(node => ({
+    tag: node.display_name || node.name,
+    type: node.node_type,
+    server: node.server,
+    server_port: node.port,
+  }))
+
+  return JSON.stringify({
+    outbounds: [
+      ...outbounds,
+      {
+        tag: "direct",
+        type: "direct"
+      }
+    ]
+  }, null, 2)
 }
 
-async function loadNodes() {
-  if (!selectedSub.value) return
+function generateBase64(nodes: Node[]): string {
+  const lines = nodes.map(node => {
+    if (node.node_type === 'vless') {
+      return `vless://${node.server}:${node.port}`
+    } else if (node.node_type === 'vmess') {
+      return `vmess://${node.server}:${node.port}`
+    } else if (node.node_type === 'trojan') {
+      return `trojan://${node.server}:${node.port}`
+    } else if (node.node_type === 'ss') {
+      return `ss://${node.server}:${node.port}`
+    }
+    return `${node.node_type}://${node.server}:${node.port}`
+  })
+
+  return btoa(lines.join('\n'))
+}
+
+async function loadAllNodes() {
+  loading.value = true
   try {
-    const res = await getNodes(selectedSub.value)
+    const res = await getAllNodes()
     nodes.value = res.data || []
-  } catch {}
-}
-
-function regroup() {
-  // Reactive, no action needed
+  } catch (e) {
+    message.error('加载节点失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(async () => {
-  try {
-    const res = await getSubscriptions(1, 100)
-    subscriptions.value = res.data.items || res.data
-    if (subscriptions.value.length > 0) {
-      selectedSub.value = subscriptions.value[0].id
-      await loadNodes()
-    }
-  } catch {}
+  await loadAllNodes()
   window.addEventListener('resize', () => { isMobile.value = window.innerWidth <= 768 })
 })
 </script>

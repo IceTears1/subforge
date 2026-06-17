@@ -924,6 +924,33 @@ def parse_clash_yaml(content: str) -> list:
 
     return nodes
 
+@app.get("/api/nodes/all")
+def get_all_nodes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get all nodes from all subscriptions for the current user"""
+    subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
+    sub_ids = [s.id for s in subs]
+
+    if not sub_ids:
+        return []
+
+    nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
+    return [
+        {
+            "id": n.id,
+            "name": n.name,
+            "display_name": n.display_name,
+            "node_type": n.node_type,
+            "server": n.server,
+            "port": n.port,
+            "region": n.region,
+            "latency": n.latency,
+            "status": n.status,
+            "subscription_id": n.subscription_id,
+            "subscription_name": next((s.name for s in subs if s.id == n.subscription_id), "")
+        }
+        for n in nodes
+    ]
+
 @app.get("/api/subscriptions/{sub_id}/nodes")
 def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
