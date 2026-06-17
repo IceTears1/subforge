@@ -82,6 +82,18 @@ class APIKey(Base):
     status = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    username = Column(String(64))
+    action = Column(String(32))
+    resource = Column(String(32))
+    detail = Column(Text)
+    ip = Column(String(64))
+    success = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # ─── Create tables ────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
@@ -194,9 +206,19 @@ def health():
 def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username, User.status == 1).first()
     if not user or not verify_password(req.password, user.password):
+        # Log failed login
+        audit = AuditLog(user_id=0, username=req.username, action="login", resource="auth", detail="login failed", ip="unknown", success=0)
+        db.add(audit)
+        db.commit()
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token({"sub": user.id, "role": user.role})
+
+    # Log successful login
+    audit = AuditLog(user_id=user.id, username=user.username, action="login", resource="auth", detail="login success", ip="unknown", success=1)
+    db.add(audit)
+    db.commit()
+
     return {
         "token": token,
         "user": {"id": user.id, "username": user.username, "role": user.role}
@@ -1296,14 +1318,25 @@ def get_metrics(db: Session = Depends(get_db)):
     nodes = db.query(Node).count()
 
     # Get process memory
-    memory_mb = 0
+    process_memory_mb = 0
     try:
-        # Read from /proc/self/status on Linux
         with open('/proc/self/status', 'r') as f:
             for line in f:
                 if line.startswith('VmRSS:'):
                     memory_kb = int(line.split()[1])
-                    memory_mb = memory_kb / 1024
+                    process_memory_mb = memory_kb / 1024
+                    break
+    except:
+        pass
+
+    # Get system memory
+    system_memory_mb = 0
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    memory_kb = int(line.split()[1])
+                    system_memory_mb = memory_kb / 1024
                     break
     except:
         pass
@@ -1318,8 +1351,8 @@ def get_metrics(db: Session = Depends(get_db)):
         "nodes": nodes,
         "uptime_seconds": uptime,
         "memory": {
-            "alloc_mb": round(memory_mb, 2),
-            "total_mb": round(memory_mb, 2)
+            "alloc_mb": round(process_memory_mb, 2),
+            "total_mb": round(system_memory_mb, 2)
         },
         "goroutines": 1,
         "cpu_percent": 0,
@@ -1346,8 +1379,9 @@ def get_version():
     }
 
 @app.get("/api/audit")
-def get_audit(current_user: User = Depends(require_admin)):
-    return {"logs": []}
+def get_audit(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(100).all()
+    return {"logs": [{"id": l.id, "user_id": l.user_id, "username": l.username, "action": l.action, "resource": l.resource, "detail": l.detail, "ip": l.ip, "success": l.success, "created_at": str(l.created_at)} for l in logs]}
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
