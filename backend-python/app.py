@@ -1201,6 +1201,16 @@ def get_metrics(db: Session = Depends(get_db)):
     nodes = db.query(Node).count()
     return {"users": users, "subscriptions": subs, "nodes": nodes, "uptime_seconds": 0}
 
+@app.get("/api/version")
+def get_version():
+    return {
+        "version": "1.0.0",
+        "name": "SubForge",
+        "description": "VPN 订阅链接统一转换平台",
+        "python_version": "3.11",
+        "fastapi_version": "0.109.0"
+    }
+
 @app.get("/api/audit")
 def get_audit(current_user: User = Depends(require_admin)):
     return {"logs": []}
