@@ -5,6 +5,7 @@ export interface Subscription {
   user_id: number
   name: string
   url: string
+  token?: string
   auto_refresh: number
   tags: string[]
   last_fetch: string | null

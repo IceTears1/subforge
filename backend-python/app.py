@@ -1076,6 +1076,57 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse("\n".join(lines), media_type="text/plain")
 
+@app.get("/sub/{token}/export/group")
+def export_subscription_by_group(
+    token: str,
+    target: str = "clash",
+    group_by: str = "region",
+    group_value: str = "",
+    db: Session = Depends(get_db)
+):
+    """Export subscription filtered by group (region/type/status)"""
+    from fastapi.responses import PlainTextResponse
+
+    sub = db.query(Subscription).filter(Subscription.token == token, Subscription.status == 1).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+
+    # Filter nodes by group criteria
+    if group_by == "region":
+        nodes = [n for n in nodes if (n.region or "OTHER") == group_value]
+    elif group_by == "type":
+        nodes = [n for n in nodes if n.node_type == group_value]
+    elif group_by == "status":
+        is_online = group_value == "在线"
+        nodes = [n for n in nodes if (n.status == 1) == is_online]
+
+    if not nodes:
+        raise HTTPException(status_code=404, detail="No nodes found for this group")
+
+    if target == "clash" or target == "mihomo":
+        yaml_content = generate_clash_yaml(nodes)
+        return PlainTextResponse(yaml_content, media_type="text/yaml")
+    elif target == "singbox":
+        json_content = generate_singbox_json(nodes)
+        return PlainTextResponse(json_content, media_type="application/json")
+    elif target == "base64":
+        base64_content = generate_base64_subscription(nodes)
+        return PlainTextResponse(base64_content, media_type="text/plain")
+    else:
+        lines = []
+        for node in nodes:
+            if node.node_type == "vless":
+                lines.append(f"vless://{node.server}:{node.port}")
+            elif node.node_type == "vmess":
+                lines.append(f"vmess://{node.server}:{node.port}")
+            elif node.node_type == "trojan":
+                lines.append(f"trojan://{node.server}:{node.port}")
+            elif node.node_type == "ss":
+                lines.append(f"ss://{node.server}:{node.port}")
+        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+
 def generate_clash_yaml(nodes: list) -> str:
     """Generate Clash/Mihomo YAML format"""
     import yaml
