@@ -1029,7 +1029,15 @@ def generate_clash_yaml(nodes: list) -> str:
                 proxy["tls"] = True
 
             if proxy["tls"]:
-                proxy["servername"] = config_data.get("servername", config_data.get("data", {}).get("servername", params.get("sni", node.server)))
+                # Try sni first, then host, then server
+                servername = config_data.get("servername", config_data.get("data", {}).get("servername", ""))
+                if not servername:
+                    servername = params.get("sni", "")
+                if not servername:
+                    servername = params.get("host", "")
+                if not servername:
+                    servername = node.server
+                proxy["servername"] = servername
 
             # Network settings
             network = config_data.get("net", config_data.get("data", {}).get("net", params.get("type", "tcp")))
