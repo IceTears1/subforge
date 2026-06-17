@@ -24,19 +24,23 @@
         <n-space>
           <n-button
             type="primary"
+            size="large"
             :loading="speedTesting"
             :disabled="selectedSub === ''"
             @click="handleSpeedTest"
+            style="font-weight: 600; min-width: 140px;"
           >
             <template #icon><n-icon :component="SpeedometerOutline" /></template>
-            {{ speedTesting ? '测速中...' : '一键测速' }}
+            {{ speedTesting ? '测速中...' : '⚡ 一键测速' }}
           </n-button>
           <n-button
             type="success"
+            size="large"
             @click="showExportModal = true"
+            style="font-weight: 600; min-width: 140px;"
           >
             <template #icon><n-icon :component="DownloadOutline" /></template>
-            导出订阅
+            📦 导出订阅
           </n-button>
         </n-space>
       </n-space>
