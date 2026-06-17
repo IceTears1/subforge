@@ -39,7 +39,9 @@
       </n-grid>
 
       <n-empty v-if="groups.length === 0 && !loading" description="暂无节点数据" style="padding: 40px 0" />
-      <n-spin :show="loading" style="padding: 40px 0" description="加载中..." />
+      <div v-if="loading" style="padding: 40px 0; text-align: center;">
+        <n-spin size="medium" description="加载中..." />
+      </div>
     </n-card>
 
     <!-- Export Modal -->
