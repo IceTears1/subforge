@@ -1288,10 +1288,52 @@ def generate_base64_subscription(nodes: list) -> str:
 
 @app.get("/api/metrics")
 def get_metrics(db: Session = Depends(get_db)):
+    import time
+    import os
+
     users = db.query(User).count()
     subs = db.query(Subscription).count()
     nodes = db.query(Node).count()
-    return {"users": users, "subscriptions": subs, "nodes": nodes, "uptime_seconds": 0}
+
+    # Get process memory
+    memory_mb = 0
+    try:
+        # Read from /proc/self/status on Linux
+        with open('/proc/self/status', 'r') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    memory_kb = int(line.split()[1])
+                    memory_mb = memory_kb / 1024
+                    break
+    except:
+        pass
+
+    # Calculate uptime
+    global start_time
+    uptime = int(time.time() - start_time) if 'start_time' in globals() else 0
+
+    return {
+        "users": users,
+        "subscriptions": subs,
+        "nodes": nodes,
+        "uptime_seconds": uptime,
+        "memory": {
+            "alloc_mb": round(memory_mb, 2),
+            "total_mb": round(memory_mb, 2)
+        },
+        "goroutines": 1,
+        "cpu_percent": 0,
+        "go_version": "Python 3.11",
+        "database": {
+            "users": users,
+            "subscriptions": subs,
+            "nodes": nodes
+        }
+    }
+
+# Record start time
+import time
+start_time = time.time()
 
 @app.get("/api/version")
 def get_version():
