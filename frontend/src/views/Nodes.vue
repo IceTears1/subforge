@@ -22,16 +22,33 @@
           <n-tag :bordered="false" type="info">区域: {{ regionCount }}</n-tag>
         </n-space>
         <n-space>
-          <n-dropdown :options="speedTestOptions" @select="handleSpeedTestType" :disabled="selectedSub === ''">
+          <n-button-group>
             <n-button
               type="primary"
               :loading="speedTesting"
               :disabled="selectedSub === ''"
+              @click="handleSpeedTestType('latency')"
             >
               <template #icon><n-icon :component="SpeedometerOutline" /></template>
-              {{ speedTesting ? '测速中...' : '测速' }}
+              {{ speedTesting ? '测速中...' : '延迟测试' }}
             </n-button>
-          </n-dropdown>
+            <n-button
+              type="info"
+              :loading="speedTesting"
+              :disabled="selectedSub === ''"
+              @click="handleSpeedTestType('direct')"
+            >
+              直接下载
+            </n-button>
+            <n-button
+              type="warning"
+              :loading="speedTesting"
+              :disabled="selectedSub === ''"
+              @click="handleSpeedTestType('proxy')"
+            >
+              代理下载
+            </n-button>
+          </n-button-group>
           <n-button
             type="success"
             @click="showExportModal = true"
@@ -98,7 +115,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText, NGrid, NGi, NDropdown } from 'naive-ui'
+import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText, NGrid, NGi, NButtonGroup } from 'naive-ui'
 import { SpeedometerOutline, DownloadOutline, CopyOutline, OpenOutline } from '@vicons/ionicons5'
 import QRCodeVue3 from 'qrcode.vue'
 import { getSubscriptions, getNodes } from '../api/subscription'
