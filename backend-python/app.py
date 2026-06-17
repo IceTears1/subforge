@@ -1013,24 +1013,58 @@ def generate_clash_yaml(nodes: list) -> str:
             # Check both direct and nested data field
             proxy["uuid"] = config_data.get("uuid", config_data.get("data", {}).get("uuid", str(uuid.uuid4())))
             proxy["udp"] = True
+
+            # Parse params string if exists
+            params_str = config_data.get("params", config_data.get("data", {}).get("params", ""))
+            params = {}
+            if params_str:
+                for param in params_str.split("&"):
+                    if "=" in param:
+                        key, value = param.split("=", 1)
+                        params[key] = value
+
+            # TLS settings
             proxy["tls"] = config_data.get("tls", config_data.get("data", {}).get("tls", False))
+            if params.get("security") == "tls" or params.get("security") == "reality":
+                proxy["tls"] = True
+
             if proxy["tls"]:
-                proxy["servername"] = config_data.get("servername", config_data.get("data", {}).get("servername", node.server))
+                proxy["servername"] = config_data.get("servername", config_data.get("data", {}).get("servername", params.get("sni", node.server)))
+
             # Network settings
-            network = config_data.get("net", config_data.get("data", {}).get("net", "tcp"))
+            network = config_data.get("net", config_data.get("data", {}).get("net", params.get("type", "tcp")))
             if network == "ws":
                 proxy["network"] = "ws"
-                proxy["ws-opts"] = config_data.get("ws-opts", config_data.get("data", {}).get("ws-opts", {"path": "/"}))
+                proxy["ws-opts"] = config_data.get("ws-opts", config_data.get("data", {}).get("ws-opts", {"path": params.get("path", "/")}))
             elif network == "grpc":
                 proxy["network"] = "grpc"
-                proxy["grpc-opts"] = config_data.get("grpc-opts", config_data.get("data", {}).get("grpc-opts", {"grpc-service-name": ""}))
+                proxy["grpc-opts"] = config_data.get("grpc-opts", config_data.get("data", {}).get("grpc-opts", {"grpc-service-name": params.get("serviceName", "")}))
+            elif network == "h2":
+                proxy["network"] = "h2"
+
             # Reality settings
-            flow = config_data.get("flow", config_data.get("data", {}).get("flow", ""))
-            if flow:
-                proxy["flow"] = flow
-            reality_opts = config_data.get("reality-opts", config_data.get("data", {}).get("reality-opts"))
-            if reality_opts:
-                proxy["reality-opts"] = reality_opts
+            if params.get("security") == "reality":
+                proxy["flow"] = params.get("flow", "xtls-rprx-vision")
+                proxy["client-fingerprint"] = params.get("fp", "chrome")
+                proxy["reality-opts"] = {
+                    "public-key": params.get("pbk", ""),
+                    "short-id": params.get("sid", "")
+                }
+                # Skip cert verify for reality
+                if params.get("insecure") == "0":
+                    proxy["skip-cert-verify"] = False
+                else:
+                    proxy["skip-cert-verify"] = True
+            else:
+                # Regular flow settings
+                flow = config_data.get("flow", config_data.get("data", {}).get("flow", params.get("flow", "")))
+                if flow:
+                    proxy["flow"] = flow
+
+            # Client fingerprint
+            fp = config_data.get("fp", config_data.get("data", {}).get("fp", params.get("fp", "")))
+            if fp:
+                proxy["client-fingerprint"] = fp
 
         elif node.node_type == "vmess":
             proxy["uuid"] = config_data.get("id", str(uuid.uuid4()))
