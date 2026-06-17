@@ -9,8 +9,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY . .
 
-# Create version file
-RUN echo "1.0.0" > /app/VERSION
+# Build arguments for version info
+ARG VERSION=1.0.0
+ARG COMMIT=unknown
+
+# Create version and commit files
+RUN echo "${VERSION}" > /app/VERSION && \
+    echo "${COMMIT}" > /app/COMMIT
 
 EXPOSE 8081
 

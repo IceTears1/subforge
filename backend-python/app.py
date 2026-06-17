@@ -1430,9 +1430,17 @@ def get_update_version():
     except:
         current_version = "1.0.0"
 
+    # Read commit hash from COMMIT file
+    try:
+        with open('/app/COMMIT', 'r') as f:
+            current_commit = f.read().strip()
+    except:
+        current_commit = ""
+
     return {
         "current": current_version,
         "current_tag": current_version,
+        "current_commit": current_commit,
         "latest": current_version,
         "latest_tag": current_version,
         "has_update": False,
