@@ -72,7 +72,7 @@ import {
   NLayout, NLayoutSider, NLayoutHeader, NLayoutContent, NMenu, NButton, NIcon,
   NBreadcrumb, NBreadcrumbItem, NSpace, NTag, NDrawer, NDrawerContent,
 } from 'naive-ui'
-import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline, KeyOutline, StatsChartOutline, ServerOutline, DownloadOutline, AnalyticsOutline, GitCompareOutline, SpeedometerOutline, LayersOutline, StarOutline, PricetagsOutline } from '@vicons/ionicons5'
+import { MenuOutline, GridOutline, CloudOutline, SwapHorizontalOutline, PeopleOutline, SettingsOutline, MoonOutline, SunnyOutline, KeyOutline, StatsChartOutline, ServerOutline, DownloadOutline, AnalyticsOutline, GitCompareOutline, SpeedometerOutline, LayersOutline } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import type { MenuOption } from 'naive-ui'
@@ -101,8 +101,6 @@ const menuOptions: MenuOption[] = [
   { label: '订阅对比', key: '/compare', icon: () => h(NIcon, { component: GitCompareOutline }) },
   { label: '性能测试', key: '/performance', icon: () => h(NIcon, { component: SpeedometerOutline }) },
   { label: '节点分组', key: '/groups', icon: () => h(NIcon, { component: LayersOutline }) },
-  { label: '收藏节点', key: '/favorites', icon: () => h(NIcon, { component: StarOutline }) },
-  { label: '标签管理', key: '/tags', icon: () => h(NIcon, { component: PricetagsOutline }) },
   { label: '在线转换', key: '/convert', icon: () => h(NIcon, { component: SwapHorizontalOutline }) },
   { label: 'API Keys', key: '/apikeys', icon: () => h(NIcon, { component: KeyOutline }) },
   ...(auth.isAdmin ? [
@@ -116,7 +114,7 @@ const menuOptions: MenuOption[] = [
 const activeKey = computed(() => route.path)
 const currentPageTitle = computed(() => {
   const map: Record<string, string> = {
-    '/': '仪表盘', '/subscriptions': '订阅管理', '/nodes': '节点管理', '/statistics': '数据统计', '/compare': '订阅对比', '/performance': '性能测试', '/groups': '节点分组', '/favorites': '收藏节点', '/tags': '标签管理', '/convert': '在线转换',
+    '/': '仪表盘', '/subscriptions': '订阅管理', '/nodes': '节点管理', '/statistics': '数据统计', '/compare': '订阅对比', '/performance': '性能测试', '/groups': '节点分组', '/convert': '在线转换',
     '/users': '子账户管理', '/apikeys': 'API Keys', '/monitor': '系统监控', '/update': '版本更新', '/settings': '系统设置',
   }
   return map[route.path] || ''
