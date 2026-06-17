@@ -1378,6 +1378,58 @@ def get_version():
         "fastapi_version": "0.109.0"
     }
 
+@app.get("/api/update/version")
+def get_update_version():
+    return {
+        "current": "1.0.0",
+        "current_tag": "v1.0.0",
+        "latest": "1.0.0",
+        "latest_tag": "v1.0.0",
+        "has_update": False,
+        "changelog": "",
+        "last_check": "",
+        "update_mode": "tag",
+        "updating": False
+    }
+
+@app.get("/api/update/releases")
+def get_releases():
+    return [
+        {
+            "tag": "v1.0.0",
+            "commit_hash": "latest",
+            "message": "Initial release",
+            "date": "2026-06-15",
+            "is_current": True
+        }
+    ]
+
+@app.get("/api/update/status")
+def get_update_status():
+    return {"updating": False, "last_result": None}
+
+@app.get("/api/update/changelog")
+def get_changelog():
+    return [
+        {
+            "hash": "latest",
+            "message": "Initial release",
+            "date": "2026-06-15"
+        }
+    ]
+
+@app.post("/api/update/latest")
+def update_to_latest():
+    return {"success": True, "from": "1.0.0", "to": "1.0.0", "steps": [], "timestamp": ""}
+
+@app.post("/api/update/tag")
+def update_to_tag():
+    return {"success": True, "from": "1.0.0", "to": "1.0.0", "steps": [], "timestamp": ""}
+
+@app.post("/api/update/rollback")
+def rollback():
+    return {"success": True, "from": "1.0.0", "to": "1.0.0", "steps": [], "timestamp": ""}
+
 @app.get("/api/audit")
 def get_audit(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(100).all()
