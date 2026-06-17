@@ -26,6 +26,8 @@ export interface Node {
   port: number
   region: string
   latency: number
+  download_speed?: number
+  download_speed_type?: string
   status: number
 }
 

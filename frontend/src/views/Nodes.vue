@@ -22,19 +22,19 @@
           <n-tag :bordered="false" type="info">区域: {{ regionCount }}</n-tag>
         </n-space>
         <n-space>
-          <n-button
-            type="primary"
-            :loading="speedTesting"
-            @click="handleSpeedTest"
-            :disabled="!selectedSub"
-          >
-            <template #icon><n-icon :component="SpeedometerOutline" /></template>
-            {{ speedTesting ? '测速中...' : '一键测速' }}
-          </n-button>
+          <n-dropdown :options="speedTestOptions" @select="handleSpeedTestType" :disabled="selectedSub === ''">
+            <n-button
+              type="primary"
+              :loading="speedTesting"
+              :disabled="selectedSub === ''"
+            >
+              <template #icon><n-icon :component="SpeedometerOutline" /></template>
+              {{ speedTesting ? '测速中...' : '测速' }}
+            </n-button>
+          </n-dropdown>
           <n-button
             type="success"
             @click="showExportModal = true"
-            :disabled="!selectedSub"
           >
             <template #icon><n-icon :component="DownloadOutline" /></template>
             导出订阅
@@ -48,7 +48,7 @@
         :loading="loading"
         :bordered="false"
         :max-height="600"
-        :scroll-x="800"
+        :scroll-x="900"
       />
     </n-card>
 
@@ -98,7 +98,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText, NGrid, NGi } from 'naive-ui'
+import { useMessage, NCard, NDataTable, NSelect, NInput, NSpace, NTag, NIcon, NModal, NText, NGrid, NGi, NDropdown } from 'naive-ui'
 import { SpeedometerOutline, DownloadOutline, CopyOutline, OpenOutline } from '@vicons/ionicons5'
 import QRCodeVue3 from 'qrcode.vue'
 import { getSubscriptions, getNodes } from '../api/subscription'
@@ -112,7 +112,7 @@ const exportFormat = ref('clash')
 const subscriptions = ref<Subscription[]>([])
 const nodes = ref<Node[]>([])
 const filteredNodes = ref<Node[]>([])
-const selectedSub = ref<number | null>(null)
+const selectedSub = ref<number | string>('')
 const selectedRegion = ref<string | null>(null)
 const searchQuery = ref('')
 
@@ -121,6 +121,12 @@ const exportFormatOptions = [
   { label: 'sing-box', value: 'singbox' },
   { label: 'Base64', value: 'base64' },
   { label: '纯文本', value: 'text' },
+]
+
+const speedTestOptions = [
+  { label: '延迟测试', key: 'latency' },
+  { label: '直接下载测速', key: 'direct' },
+  { label: '代理下载测速', key: 'proxy' },
 ]
 
 const subOptions = computed(() => {
@@ -157,19 +163,19 @@ const exportUrl = computed(() => {
 
 const columns = [
   { title: 'ID', key: 'id', width: 60 },
-  { title: '名称', key: 'display_name', width: 200, ellipsis: { tooltip: true } },
-  { title: '类型', key: 'node_type', width: 80 },
-  { title: '地址', key: 'server', width: 150, ellipsis: { tooltip: true } },
-  { title: '端口', key: 'port', width: 70 },
+  { title: '名称', key: 'display_name', width: 180, ellipsis: { tooltip: true } },
+  { title: '类型', key: 'node_type', width: 70 },
+  { title: '地址', key: 'server', width: 130, ellipsis: { tooltip: true } },
+  { title: '端口', key: 'port', width: 60 },
   {
-    title: '区域', key: 'region', width: 80,
+    title: '区域', key: 'region', width: 70,
     render(row: Node) {
       const emoji = { HK: '🇭🇰', JP: '🇯🇵', SG: '🇸🇬', US: '🇺🇸', TW: '🇨🇳', KR: '🇰🇷', UK: '🇬🇧', DE: '🇩🇪' }[row.region] || '🌐'
       return `${emoji} ${row.region || '-'}`
     },
   },
   {
-    title: '延迟', key: 'latency', width: 80,
+    title: '延迟', key: 'latency', width: 70,
     render(row: Node) {
       if (!row.latency || row.latency < 0) return '-'
       const color = row.latency < 200 ? '#10b981' : row.latency < 500 ? '#f59e0b' : '#ef4444'
@@ -177,7 +183,25 @@ const columns = [
     },
   },
   {
-    title: '状态', key: 'status', width: 70,
+    title: '下载速度', key: 'download_speed', width: 100,
+    render(row: Node) {
+      if (!row.download_speed || row.download_speed <= 0) return '-'
+      const speed = row.download_speed
+      let text = ''
+      let color = '#666'
+      if (speed >= 1024) {
+        text = `${(speed / 1024).toFixed(1)} MB/s`
+        color = '#10b981'
+      } else {
+        text = `${speed.toFixed(0)} KB/s`
+        color = speed >= 200 ? '#f59e0b' : '#ef4444'
+      }
+      const typeTag = row.download_speed_type === 'proxy' ? ' [代理]' : ' [直连]'
+      return h('span', { style: { color } }, text + typeTag)
+    },
+  },
+  {
+    title: '状态', key: 'status', width: 60,
     render(row: Node) {
       return h(NTag, { type: row.status === 1 ? 'success' : 'error', size: 'small', bordered: false }, { default: () => row.status === 1 ? '在线' : '离线' })
     },
@@ -188,8 +212,7 @@ async function loadSubs() {
   try {
     const res = await getSubscriptions(1, 100)
     subscriptions.value = res.data.items || res.data
-    if (subscriptions.value.length > 0 && !selectedSub.value) {
-      selectedSub.value = subscriptions.value[0].id
+    if (subscriptions.value.length > 0) {
       await loadNodes()
     }
   } catch {}
@@ -232,12 +255,20 @@ function filterNodes() {
   filteredNodes.value = result
 }
 
-async function handleSpeedTest() {
-  if (!selectedSub.value) {
-    message.warning('请先选择订阅')
+async function handleSpeedTestType(key: string) {
+  if (selectedSub.value === '' || selectedSub.value === null) {
+    message.warning('测速需要选择具体订阅')
     return
   }
 
+  if (key === 'latency') {
+    await handleLatencyTest()
+  } else {
+    await handleDownloadTest(key)
+  }
+}
+
+async function handleLatencyTest() {
   speedTesting.value = true
   try {
     const res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/speedtest`, {
@@ -248,11 +279,33 @@ async function handleSpeedTest() {
     if (data.results) {
       const success = data.results.filter((r: any) => r.status === 'success').length
       const failed = data.results.filter((r: any) => r.status !== 'success').length
-      message.success(`测速完成: ${success} 成功, ${failed} 失败`)
+      message.success(`延迟测试完成: ${success} 成功, ${failed} 失败`)
       await loadNodes()
     }
   } catch (e: any) {
-    message.error('测速失败')
+    message.error('延迟测试失败')
+  } finally {
+    speedTesting.value = false
+  }
+}
+
+async function handleDownloadTest(speedType: string) {
+  speedTesting.value = true
+  const typeLabel = speedType === 'proxy' ? '代理下载' : '直接下载'
+  try {
+    const res = await fetch(`/api/subscriptions/${selectedSub.value}/nodes/download-speedtest?speed_type=${speedType}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+    const data = await res.json()
+    if (data.results) {
+      const success = data.results.filter((r: any) => r.status === 'success').length
+      const failed = data.results.filter((r: any) => r.status !== 'success').length
+      message.success(`${typeLabel}测速完成: ${success} 成功, ${failed} 失败`)
+      await loadNodes()
+    }
+  } catch (e: any) {
+    message.error(`${typeLabel}测速失败`)
   } finally {
     speedTesting.value = false
   }

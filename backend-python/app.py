@@ -79,7 +79,9 @@ class Node(Base):
     region = Column(String(64))
     raw_uri = Column(Text)
     config_json = Column(JSON)
-    latency = Column(Integer)
+    latency = Column(Integer, default=0)
+    download_speed = Column(Float, default=0)  # KB/s
+    download_speed_type = Column(String(20), default="")  # "proxy" or "direct"
     status = Column(Integer, default=1)
     created_at = Column(DateTime, default=get_current_time)
     subscription = relationship("Subscription", back_populates="nodes")
@@ -1043,6 +1045,150 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
     db.commit()
 
     return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
+
+def generate_proxy_url(node: Node) -> str:
+    """Generate proxy URL from node configuration"""
+    if not node.config_json:
+        return ""
+
+    try:
+        config = node.config_json if isinstance(node.config_json, dict) else {}
+    except:
+        return ""
+
+    # Get credentials based on node type
+    if node.node_type == "vless":
+        uuid = config.get("uuid", config.get("data", {}).get("uuid", ""))
+        if uuid:
+            return f"socks5://{uuid}@{node.server}:{node.port}"
+    elif node.node_type == "vmess":
+        uuid = config.get("uuid", config.get("id", ""))
+        if uuid:
+            return f"socks5://{uuid}@{node.server}:{node.port}"
+    elif node.node_type == "trojan":
+        password = config.get("password", "")
+        if password:
+            return f"socks5://{password}@{node.server}:{node.port}"
+    elif node.node_type == "ss":
+        password = config.get("password", "")
+        method = config.get("method", "aes-256-gcm")
+        if password:
+            return f"socks5://{password}@{node.server}:{node.port}"
+
+    return ""
+
+@app.post("/api/subscriptions/{sub_id}/nodes/download-speedtest")
+def download_speedtest_nodes(
+    sub_id: int,
+    speed_type: str = "direct",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Test download speed for nodes. speed_type: 'direct' or 'proxy'"""
+    sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+    results = []
+
+    # Test URLs for download speed test
+    test_urls = [
+        "https://speed.cloudflare.com/__down?bytes=10485760",  # 10MB
+        "https://speed.cloudflare.com/__down?bytes=5242880",   # 5MB
+        "https://speed.cloudflare.com/__down?bytes=1048576",   # 1MB
+    ]
+
+    for node in nodes:
+        try:
+            import time
+            import requests
+
+            # Get proxy URL if testing through proxy
+            proxy_url = None
+            if speed_type == "proxy":
+                proxy_url = generate_proxy_url(node)
+                if not proxy_url:
+                    results.append({
+                        "id": node.id,
+                        "name": node.name,
+                        "download_speed": 0,
+                        "status": "error",
+                        "message": "无法生成代理配置"
+                    })
+                    continue
+
+            # Try each test URL
+            for url in test_urls:
+                try:
+                    start_time = time.time()
+
+                    if proxy_url:
+                        # Download through proxy
+                        proxies = {"https": proxy_url, "http": proxy_url}
+                        response = requests.get(url, proxies=proxies, timeout=10, stream=True)
+                    else:
+                        # Direct download
+                        response = requests.get(url, timeout=10, stream=True)
+
+                    if response.status_code == 200:
+                        content_length = int(response.headers.get('content-length', 0))
+                        downloaded = 0
+                        for chunk in response.iter_content(chunk_size=8192):
+                            downloaded += len(chunk)
+                            elapsed = time.time() - start_time
+                            if elapsed > 10:  # Max 10 seconds per test
+                                break
+
+                        elapsed = time.time() - start_time
+                        if elapsed > 0 and downloaded > 0:
+                            speed_kbps = (downloaded / 1024) / elapsed  # KB/s
+
+                            # Save to database
+                            node.download_speed = round(speed_kbps, 2)
+                            node.download_speed_type = speed_type
+
+                            results.append({
+                                "id": node.id,
+                                "name": node.name,
+                                "download_speed": round(speed_kbps, 2),
+                                "status": "success"
+                            })
+                            break
+                    else:
+                        continue
+
+                except requests.exceptions.Timeout:
+                    continue
+                except Exception as e:
+                    continue
+            else:
+                # All URLs failed
+                node.download_speed = 0
+                results.append({
+                    "id": node.id,
+                    "name": node.name,
+                    "download_speed": 0,
+                    "status": "failed"
+                })
+
+        except Exception as e:
+            results.append({
+                "id": node.id,
+                "name": node.name,
+                "download_speed": 0,
+                "status": "error"
+            })
+
+    # Save to database
+    db.commit()
+
+    return {
+        "results": results,
+        "total": len(results),
+        "success": sum(1 for r in results if r["status"] == "success"),
+        "speed_type": speed_type
+    }
 
 @app.get("/api/formats")
 def list_formats():
