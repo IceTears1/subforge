@@ -1023,6 +1023,12 @@ def generate_clash_yaml(nodes: list) -> str:
                         key, value = param.split("=", 1)
                         params[key] = value
 
+            # Fix server address - use host or sni if server is placeholder
+            server = node.server
+            if server in ["127.0.0.1", "0.0.0.0", "localhost"]:
+                server = params.get("host", params.get("sni", server))
+            proxy["server"] = server
+
             # TLS settings
             proxy["tls"] = config_data.get("tls", config_data.get("data", {}).get("tls", False))
             if params.get("security") == "tls" or params.get("security") == "reality":
@@ -1036,7 +1042,7 @@ def generate_clash_yaml(nodes: list) -> str:
                 if not servername:
                     servername = params.get("host", "")
                 if not servername:
-                    servername = node.server
+                    servername = server
                 proxy["servername"] = servername
 
             # Network settings
