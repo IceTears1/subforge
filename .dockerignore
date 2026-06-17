@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Node modules
+frontend/node_modules
+frontend/dist
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+
+# Docker
+images/
+*.tar.gz
+
+# IDE
+.vscode
+.idea
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
