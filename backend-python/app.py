@@ -962,6 +962,70 @@ def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_
     nodes = query.all()
     return [{"id": n.id, "name": n.name, "display_name": n.display_name, "node_type": n.node_type, "server": n.server, "port": n.port, "region": n.region, "latency": n.latency, "status": n.status} for n in nodes]
 
+@app.post("/api/subscriptions/{sub_id}/check")
+def check_subscription_health(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Check health of nodes in a subscription"""
+    sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+    total = len(nodes)
+    online = 0
+    offline = 0
+
+    import socket
+    import concurrent.futures
+
+    for node in nodes:
+        try:
+            def test_connection(port):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2)
+                    result = sock.connect_ex((node.server, port))
+                    sock.close()
+                    return result == 0
+                except:
+                    return False
+
+            # Test common ports
+            test_ports = [node.port, 80, 443, 8080, 8443]
+            is_online = False
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(test_connection, port): port for port in test_ports}
+                for future in concurrent.futures.as_completed(futures, timeout=5):
+                    try:
+                        if future.result():
+                            is_online = True
+                            break
+                    except:
+                        pass
+
+            # Fallback: DNS resolution
+            if not is_online:
+                try:
+                    socket.gethostbyname(node.server)
+                    is_online = True
+                except:
+                    pass
+
+            if is_online:
+                online += 1
+                node.status = 1
+            else:
+                offline += 1
+                node.status = 0
+
+        except Exception as e:
+            offline += 1
+            node.status = 0
+
+    db.commit()
+
+    return {"total": total, "online": online, "offline": offline}
+
 @app.post("/api/subscriptions/{sub_id}/nodes/speedtest")
 def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
