@@ -325,15 +325,26 @@ setup_ssl() {
 
     # Get SSL certificate
     info "申请 SSL 证书..."
-    docker compose stop nginx 2>/dev/null || true
-    sleep 2
+
+    # Stop nginx and wait for port 80 to be released
+    docker compose down 2>/dev/null || true
+    sleep 3
+
+    # Check if port 80 is still in use
+    if lsof -i :80 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep -q ":80 "; then
+        warn "端口 80 仍被占用，尝试强制释放..."
+        fuser -k 80/tcp 2>/dev/null || true
+        sleep 2
+    fi
 
     if certbot certonly --standalone \
         -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive; then
         log "SSL 证书申请成功"
     else
         warn "SSL 证书申请失败，请确保域名已解析到本机 IP"
-        docker compose start nginx 2>/dev/null || true
+        # Restart services
+        cd "$INSTALL_DIR"
+        docker compose up -d
         return
     fi
 
@@ -351,7 +362,9 @@ EOF
         (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
     fi
 
-    docker compose start nginx 2>/dev/null || true
+    # Restart all services
+    cd "$INSTALL_DIR"
+    docker compose up -d
     log "SSL 配置完成"
 }
 
