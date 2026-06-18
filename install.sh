@@ -707,7 +707,8 @@ EOF
     fi
 
     # Always update nginx config with current BACKEND_PORT
-    sed -i "s/proxy_pass http:\/\/172.17.0.1:[0-9]*/proxy_pass http:\/\/172.17.0.1:${BACKEND_PORT:-8081}/g" "$INSTALL_DIR/nginx/nginx-python.conf" 2>/dev/null || true
+    # Match both numeric ports and shell variable expressions like ${BACKEND_PORT:-8081}
+    sed -i "s|proxy_pass http://172.17.0.1:[^;]*;|proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};|g" "$INSTALL_DIR/nginx/nginx-python.conf" 2>/dev/null || true
 }
 
 check_containers() {

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.3 (2026-06-18)
+
+### Bug Fixes
+- **修复 Nginx 配置语法错误** — 使用 `envsubst` 动态替换端口变量，解决容器 crash-loop 问题
+- **Nginx 端口动态配置** — 支持 `.env` 中 `BACKEND_PORT` 自动同步到 nginx 配置
+
+### Improvements
+- 优化 Docker 入口脚本，配置模板化生成
+- 更新安装脚本端口匹配逻辑
+
 ## v1.0.2 (2026-06-18)
 
 ### Features
