@@ -5,15 +5,11 @@
 #   前端 (nginx)  → FRONTEND_PORT (默认 3001)
 #   后端 (python) → BACKEND_PORT (默认 3002, host 网络)
 #   数据库 (pg)   → DB_PORT (默认 45000)
-#   HTTPS         → SSL_PORT (默认 3003，可配置)
+#   域名代理      → 80/443 (仅域名访问时启用)
 #
-# 访问地址：
-#   HTTP:  http://YOUR_IP:FRONTEND_PORT
-#   HTTPS: https://YOUR_DOMAIN:SSL_PORT (配置 SSL 后)
-#
-# 注意：三个端口互相依赖
-#   - Backend 的 DB_PORT 必须等于 postgres 的宿主机映射端口
-#   - Nginx 的 BACKEND_PORT 必须等于 backend 的监听端口
+# 访问方式：
+#   IP 访问:   http://YOUR_IP:FRONTEND_PORT
+#   域名访问:  https://YOUR_DOMAIN (配置 SSL 后)
 # ========================================
 
 services:
@@ -71,7 +67,6 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3001}:80"
-      - "${SSL_PORT:-3003}:443"
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-3002}
       - DOMAIN=${DOMAIN:-}
@@ -85,6 +80,27 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - subforge
+
+  # 域名代理 (仅配置域名时启用)
+  # 使用: docker compose --profile proxy up -d
+  proxy:
+    image: nginx:alpine
+    container_name: subforge-proxy
+    restart: unless-stopped
+    profiles:
+      - proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-}
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - nginx
     networks:
       - subforge
 

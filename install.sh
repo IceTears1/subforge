@@ -20,7 +20,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.1.2"
+VERSION="1.1.3"
 
 # Default ports (configurable via interactive prompts)
 FRONTEND_PORT=3001
@@ -412,53 +412,69 @@ setup_ssl() {
     echo ""
     info "配置域名访问..."
 
-    # First, configure nginx to accept domain (HTTP)
+    # Create proxy directory and config
     cd "$INSTALL_DIR"
-    cat > nginx/nginx.conf <<EOF
-server {
-    listen 80;
-    server_name ${DOMAIN};
+    mkdir -p proxy
 
-    # Security headers
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
+    cat > proxy/nginx.conf <<EOF
+worker_processes auto;
 
-    # API reverse proxy
-    location /api/ {
-        proxy_pass http://172.17.0.1:${BACKEND_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 300s;
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+
+    # Rate limiting
+    limit_req_zone \$binary_remote_addr zone=api:10m rate=30r/s;
+
+    # HTTP -> HTTPS redirect
+    server {
+        listen 80;
+        server_name ${DOMAIN};
+        return 301 https://\$host\$request_uri;
     }
 
-    # Client subscription endpoint
-    location /sub/ {
-        proxy_pass http://172.17.0.1:${BACKEND_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
+    # HTTPS server
+    server {
+        listen 443 ssl;
+        server_name ${DOMAIN};
 
-    # Frontend
-    location / {
-        root /usr/share/nginx/html;
-        try_files \$uri \$uri/ /index.html;
+        # SSL certificates
+        ssl_certificate /etc/nginx/certs/${DOMAIN}.pem;
+        ssl_certificate_key /etc/nginx/certs/${DOMAIN}.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+
+        # Security headers
+        add_header X-Frame-Options DENY always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+        # Hide server info
+        server_tokens off;
+
+        # Proxy to frontend nginx
+        location / {
+            proxy_pass http://nginx:80;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_read_timeout 300s;
+            proxy_connect_timeout 60s;
+        }
     }
 }
 EOF
 
-    # Restart nginx to apply domain config
-    cd "$INSTALL_DIR"
-    docker compose restart nginx
-    sleep 2
-
-    # Test domain access
-    if curl -sf "http://${DOMAIN}" >/dev/null 2>&1; then
-        log "域名访问正常: http://${DOMAIN}"
-    else
-        warn "域名访问失败，请检查 DNS 解析"
-    fi
+    log "代理配置已创建"
 
     # Now setup SSL
     if [ "$SSL_PROVIDER" = "2" ] && [ -n "$ALI_AK" ] && [ -n "$ALI_SK" ]; then
@@ -469,9 +485,12 @@ EOF
         warn "跳过 SSL 配置"
     fi
 
-    # Final restart
-    cd "$INSTALL_DIR"
-    docker compose up -d
+    # Start proxy if SSL certificates exist
+    if [ -f "$INSTALL_DIR/certs/${DOMAIN}/${DOMAIN}.pem" ] && [ -f "$INSTALL_DIR/certs/${DOMAIN}/${DOMAIN}.key" ]; then
+        info "启动域名代理..."
+        docker compose --profile proxy up -d
+        log "域名代理已启动"
+    fi
 }
 
 setup_letsencrypt_ssl() {
@@ -525,21 +544,20 @@ setup_letsencrypt_ssl() {
             sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" "$INSTALL_DIR/.env"
         fi
 
-        # Restart nginx to apply SSL config
+        # Start proxy with SSL
         cd "$INSTALL_DIR"
-        docker compose down nginx 2>/dev/null || true
-        docker compose up -d nginx
+        docker compose --profile proxy up -d
 
         # Setup auto-renewal
         HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
         mkdir -p "$HOOK_DIR"
-        cat > "$HOOK_DIR/restart-nginx.sh" <<'EOF'
+        cat > "$HOOK_DIR/restart-proxy.sh" <<'EOF'
 #!/bin/bash
-cd /opt/subforge && docker compose restart nginx 2>/dev/null || true
+cd /opt/subforge && docker compose --profile proxy restart 2>/dev/null || true
 EOF
-        chmod +x "$HOOK_DIR/restart-nginx.sh"
+        chmod +x "$HOOK_DIR/restart-proxy.sh"
 
-        CRON_LINE="0 3,15 * * * certbot renew --quiet --deploy-hook '/etc/letsencrypt/renewal-hooks/deploy/restart-nginx.sh'"
+        CRON_LINE="0 3,15 * * * certbot renew --quiet --deploy-hook '/etc/letsencrypt/renewal-hooks/deploy/restart-proxy.sh'"
         if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
             (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
         fi
@@ -610,10 +628,9 @@ setup_aliyun_ssl() {
                 sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" "$INSTALL_DIR/.env"
             fi
 
-            # Restart nginx to apply SSL config
+            # Start proxy with SSL
             cd "$INSTALL_DIR"
-            docker compose down nginx 2>/dev/null || true
-            docker compose up -d nginx
+            docker compose --profile proxy up -d
 
             log "SSL 配置完成!"
         else
