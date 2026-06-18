@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: subforge-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-subforge}
+      POSTGRES_USER: ${DB_USER:-subforge}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-subforge123}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-subforge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - subforge
+
+  backend:
+    build:
+      context: ./backend-python
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-1.0.0}
+        COMMIT: ${COMMIT:-unknown}
+    container_name: subforge-backend
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-subforge}
+      DB_USER: ${DB_USER:-subforge}
+      DB_PASSWORD: ${DB_PASSWORD:-subforge123}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: subforge-frontend:latest
+    container_name: subforge-nginx
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx-python.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - subforge
+
+volumes:
+  pgdata:
+
+networks:
+  subforge:
+    driver: bridge
