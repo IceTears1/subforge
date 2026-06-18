@@ -17,7 +17,8 @@ FROM nginx:alpine
 
 # Copy built files
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+# NOTE: Do NOT copy default.conf - it conflicts with nginx.conf template
+# The entrypoint generates the complete nginx config from the template
 COPY nginx/nginx-python.conf.template /etc/nginx/nginx.conf.template
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
