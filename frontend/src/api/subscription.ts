@@ -74,7 +74,7 @@ export function getFormats() {
 }
 
 export function exportSubscriptions() {
-  return api.get('/export', { responseType: 'blob' })
+  return api.get('/subscriptions/export-all')
 }
 
 export function importSubscriptions(data: any[]) {
