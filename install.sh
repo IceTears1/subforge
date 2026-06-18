@@ -339,27 +339,66 @@ setup_ssl() {
     fi
 
     echo ""
-    info "配置域名和 SSL..."
+    info "配置域名访问..."
 
-    # Update nginx config
+    # First, configure nginx to accept domain (HTTP)
     cd "$INSTALL_DIR"
-    if [ -f nginx/nginx-ssl.conf ]; then
-        cp nginx/nginx-ssl.conf nginx/nginx.conf
-        sed -i "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf 2>/dev/null || \
-            sed -i '' "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf
+    cat > nginx/nginx.conf <<EOF
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Security headers
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # API reverse proxy
+    location /api/ {
+        proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # Client subscription endpoint
+    location /sub/ {
+        proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
+
+    # Frontend
+    location / {
+        root /usr/share/nginx/html;
+        try_files \$uri \$uri/ /index.html;
+    }
+}
+EOF
+
+    # Restart nginx to apply domain config
+    cd "$INSTALL_DIR"
+    docker compose restart nginx
+    sleep 2
+
+    # Test domain access
+    if curl -sf "http://${DOMAIN}" >/dev/null 2>&1; then
+        log "域名访问正常: http://${DOMAIN}"
+    else
+        warn "域名访问失败，请检查 DNS 解析"
     fi
 
+    # Now setup SSL
     if [ "$SSL_PROVIDER" = "2" ] && [ -n "$ALI_AK" ] && [ -n "$ALI_SK" ]; then
-        # Alibaba Cloud SSL
         setup_aliyun_ssl
     elif [ "$SSL_PROVIDER" = "1" ] && [ -n "$EMAIL" ]; then
-        # Let's Encrypt
         setup_letsencrypt_ssl
     else
         warn "跳过 SSL 配置"
     fi
 
-    # Restart all services
+    # Final restart
     cd "$INSTALL_DIR"
     docker compose up -d
 }
@@ -421,152 +460,53 @@ setup_aliyun_ssl() {
     CERT_DIR="$INSTALL_DIR/certs/$DOMAIN"
     mkdir -p "$CERT_DIR"
 
-    # Install aliyun-cli if not present
-    if ! command -v aliyun &>/dev/null; then
-        info "安装阿里云 CLI..."
-        curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz | tar xz -C /usr/local/bin/
-        chmod +x /usr/local/bin/aliyun
-    fi
-
-    # Configure aliyun cli
-    aliyun configure set --profile subforge \
-        --mode AK \
-        --access-key-id "$ALI_AK" \
-        --access-key-secret "$ALI_SK" \
-        --region cn-hangzhou 2>/dev/null || true
-
     echo ""
-    info "自动申请阿里云 SSL 证书..."
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  阿里云 SSL 证书申请${NC}"
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  1. 打开阿里云 SSL 证书控制台"
+    echo -e "     ${CYAN}https://yundun.console.aliyun.com/?p=cas${NC}"
+    echo ""
+    echo -e "  2. 点击「免费证书」→「创建证书」"
+    echo -e "     - 域名: ${CYAN}${DOMAIN}${NC}"
+    echo -e "     - 验证方式: DNS 验证"
+    echo ""
+    echo -e "  3. 添加 DNS TXT 记录（控制台会显示）"
+    echo -e "     等待验证通过（约2-5分钟）"
+    echo ""
+    echo -e "  4. 证书签发后，点击「下载」"
+    echo -e "     选择 ${CYAN}Nginx${NC} 格式"
+    echo ""
+    echo -e "  5. 解压后将以下文件放到服务器:"
+    echo -e "     ${CYAN}/opt/subforge/certs/${DOMAIN}/${NC}"
+    echo -e "     - ${CYAN}${DOMAIN}.pem${NC}"
+    echo -e "     - ${CYAN}${DOMAIN}.key${NC}"
+    echo ""
+    echo -e "  ${DIM}可以用 scp 上传文件:${NC}"
+    echo -e "  ${DIM}scp *.pem *.key root@47.79.87.168:/opt/subforge/certs/${DOMAIN}/${NC}"
+    echo ""
 
-    # Step 1: Create certificate order
-    info "创建证书订单..."
-    ORDER_RESULT=$(aliyun cas CreateCertificateForPackageRequest \
-        --profile subforge \
-        --ProductCode "symantec-free-1-free" \
-        --Domain "$DOMAIN" \
-        --ValidateType "DNS" \
-        --AutoDeleteDomain true 2>&1)
-
-    ORDER_ID=$(echo "$ORDER_RESULT" | grep -o '"OrderNumber": *"[^"]*"' | cut -d'"' -f4)
-
-    if [ -z "$ORDER_ID" ]; then
-        warn "创建证书订单失败"
-        echo -e "${DIM}错误信息: $ORDER_RESULT${NC}"
-        warn "请手动申请证书"
-        echo -e "  1. 登录: ${CYAN}https://yundun.console.aliyun.com/?p=cas${NC}"
-        echo -e "  2. 下载 Nginx 格式证书到: ${CYAN}${CERT_DIR}/${NC}"
-        echo ""
-        read -p "$(echo -e ${YELLOW}证书文件已准备好? [Y/n]: ${NC})" cert_ready
-        if [[ "$cert_ready" =~ ^[Nn]$ ]]; then
-            return
+    # Wait for certificate files
+    MAX_WAIT=600
+    COUNT=0
+    while [ $COUNT -lt $MAX_WAIT ]; do
+        if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
+            log "检测到证书文件!"
+            break
         fi
-    else
-        log "证书订单已创建: $ORDER_ID"
 
-        # Step 2: Get DNS validation info
-        info "获取 DNS 验证信息..."
-        sleep 3
+        echo -ne "\r${DIM}等待证书文件... ${COUNT}s / ${MAX_WAIT}s ${NC}"
+        sleep 10
+        COUNT=$((COUNT + 10))
+    done
+    echo ""
 
-        DNS_RESULT=$(aliyun cas DescribeCertificateState \
-            --profile subforge \
-            --OrderNumber "$ORDER_ID" 2>&1)
-
-        DNS_NAME=$(echo "$DNS_RESULT" | grep -o '"DnsName": *"[^"]*"' | cut -d'"' -f4)
-        DNS_VALUE=$(echo "$DNS_RESULT" | grep -o '"DnsValue": *"[^"]*"' | cut -d'"' -f4)
-
-        if [ -n "$DNS_NAME" ] && [ -n "$DNS_VALUE" ]; then
-            echo ""
-            echo -e "${CYAN}DNS 验证记录:${NC}"
-            echo -e "  类型: TXT"
-            echo -e "  主机记录: ${CYAN}${DNS_NAME}${NC}"
-            echo -e "  记录值: ${CYAN}${DNS_VALUE}${NC}"
-            echo ""
-
-            # Step 3: Auto add DNS record
-            info "自动添加 DNS TXT 记录..."
-
-            # Extract main domain (e.g., xxice.cn from vpn.xxice.cn)
-            MAIN_DOMAIN=$(echo "$DOMAIN" | sed 's/.*\.\([^.]*\.[^.]*\)$/\1/')
-
-            # Get Zone ID
-            ZONE_RESULT=$(aliyun alidns DescribeDomains \
-                --profile subforge 2>&1)
-
-            ZONE_ID=$(echo "$ZONE_RESULT" | grep -B2 -A2 "\"DomainName\": \"$MAIN_DOMAIN\"" | grep -o '"ZoneId": *"[^"]*"' | cut -d'"' -f4)
-
-            if [ -n "$ZONE_ID" ]; then
-                # Add TXT record
-                ADD_RESULT=$(aliyun alidns AddDomainRecord \
-                    --profile subforge \
-                    --ZoneId "$ZONE_ID" \
-                    --RR "$DNS_NAME" \
-                    --Type "TXT" \
-                    --Value "$DNS_VALUE" 2>&1)
-
-                RECORD_ID=$(echo "$ADD_RESULT" | grep -o '"RecordId": *"[^"]*"' | cut -d'"' -f4)
-
-                if [ -n "$RECORD_ID" ]; then
-                    log "DNS TXT 记录已添加! (ID: $RECORD_ID)"
-                else
-                    warn "添加 DNS 记录失败，请手动添加"
-                    echo -e "${DIM}错误: $ADD_RESULT${NC}"
-                fi
-            else
-                warn "未找到域名 $MAIN_DOMAIN 的托管区"
-            fi
-
-            # Step 4: Wait for certificate
-            echo ""
-            info "等待证书签发..."
-            MAX_WAIT=300
-            COUNT=0
-
-            while [ $COUNT -lt $MAX_WAIT ]; do
-                STATUS_RESULT=$(aliyun cas DescribeCertificateState \
-                    --profile subforge \
-                    --OrderNumber "$ORDER_ID" 2>&1)
-
-                CERT_STATUS=$(echo "$STATUS_RESULT" | grep -o '"CertificateStatus": *"[^"]*"' | cut -d'"' -f4)
-
-                if [ "$CERT_STATUS" = "ISSUED" ] || [ "$CERT_STATUS" = "DV_CERTISSUED" ]; then
-                    log "证书已签发!"
-                    break
-                fi
-
-                echo -ne "\r${DIM}等待中... ${COUNT}s / ${MAX_WAIT}s${NC}"
-                sleep 10
-                COUNT=$((COUNT + 10))
-            done
-            echo ""
-
-            # Step 5: Download certificate
-            if [ "$CERT_STATUS" = "ISSUED" ] || [ "$CERT_STATUS" = "DV_CERTISSUED" ]; then
-                info "下载证书..."
-
-                CERT_RESULT=$(aliyun cas GetCertificateContent \
-                    --profile subforge \
-                    --CertificateId "$ORDER_ID" 2>&1)
-
-                CERT_PEM=$(echo "$CERT_RESULT" | grep -o '"Cert": *"[^"]*"' | cut -d'"' -f4)
-                KEY_PEM=$(echo "$CERT_RESULT" | grep -o '"Key": *"[^"]*"' | cut -d'"' -f4)
-
-                if [ -n "$CERT_PEM" ] && [ -n "$KEY_PEM" ]; then
-                    echo "$CERT_PEM" > "$CERT_DIR/${DOMAIN}.pem"
-                    echo "$KEY_PEM" > "$CERT_DIR/${DOMAIN}.key"
-                    log "证书已保存: $CERT_DIR"
-                else
-                    warn "下载证书失败，请手动下载"
-                fi
-            else
-                warn "证书签发超时，请稍后手动下载"
-            fi
-        fi
-    fi
-
-    # Step 6: Configure nginx with SSL
+    # Check if cert files exist
     if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
         info "配置 Nginx SSL..."
 
+        # Update nginx config
         cat > "$INSTALL_DIR/nginx/nginx.conf" <<EOF
 server {
     listen 80;
@@ -583,12 +523,31 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    location / {
-        proxy_pass http://backend:8081;
+    # Security headers
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # API reverse proxy
+    location /api/ {
+        proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # Client subscription endpoint
+    location /sub/ {
+        proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
+
+    # Frontend
+    location / {
+        root /usr/share/nginx/html;
+        try_files \$uri \$uri/ /index.html;
     }
 }
 EOF
@@ -597,7 +556,11 @@ EOF
         mkdir -p "$INSTALL_DIR/certs"
         ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
 
-        log "Nginx SSL 配置完成"
+        # Restart nginx
+        cd "$INSTALL_DIR"
+        docker compose restart nginx
+
+        log "SSL 配置完成!"
     else
         warn "证书文件不存在，跳过 SSL 配置"
     fi
