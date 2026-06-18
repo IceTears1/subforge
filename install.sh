@@ -178,11 +178,11 @@ interactive_config() {
 
     # Domain (optional)
     echo ""
-    echo -e "${DIM}--- 可选: 域名/SSL 配置 (留空跳过) ---${NC}"
-    read -p "$(echo -e ${YELLOW}域名 (例: example.com): ${NC})" input
+    echo -e "${DIM}--- 可选: 域名/SSL 配置 留空跳过 ---${NC}"
+    read -p "$(echo -e ${YELLOW}域名 例: example.com: ${NC})" input
     DOMAIN="${input:-}"
     if [ -n "$DOMAIN" ]; then
-        read -p "$(echo -e ${YELLOW}邮箱 (用于SSL证书): ${NC})" input
+        read -p "$(echo -e ${YELLOW}邮箱 用于SSL证书: ${NC})" input
         EMAIL="${input:-}"
     fi
 
