@@ -132,6 +132,7 @@ generate_config() {
     [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(gen_pass 24)
     [ -z "$JWT_SECRET" ] && JWT_SECRET=$(gen_pass 32)
     [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
+    [ -z "$ADMIN_USERNAME" ] && ADMIN_USERNAME="admin"
 
     cat > .env <<EOF
 PORT=${PORT}
@@ -141,6 +142,7 @@ DB_PASSWORD=${DB_PASSWORD}
 DB_SSL_MODE=disable
 JWT_SECRET=${JWT_SECRET}
 JWT_EXPIRY=24h
+ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 CORS_ORIGINS=
 ADMIN_IP_WHITELIST=
@@ -225,14 +227,19 @@ interactive_config() {
     read -p "$(echo -e ${YELLOW}访问端口 [${PORT}]: ${NC})" input_port
     PORT="${input_port:-$PORT}"
 
+    # Admin username
+    read -p "$(echo -e ${YELLOW}管理员账户 [admin]: ${NC})" input_username
+    ADMIN_USERNAME="${input_username:-admin}"
+
     # Admin password
     read -p "$(echo -e ${YELLOW}管理员密码 [随机生成]: ${NC})" input_password
     ADMIN_PASSWORD="${input_password:-$(gen_pass 16)}"
 
     echo ""
     log "配置确认:"
-    echo -e "  端口:       ${CYAN}${PORT}${NC}"
-    echo -e "  管理员密码: ${CYAN}${ADMIN_PASSWORD}${NC}"
+    echo -e "  端口:         ${CYAN}${PORT}${NC}"
+    echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
+    echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
     echo ""
 
     read -p "$(echo -e ${YELLOW}确认开始安装? [Y/n]: ${NC})" confirm

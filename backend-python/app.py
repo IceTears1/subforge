@@ -35,6 +35,7 @@ DATABASE_URL = f"postgresql://{os.getenv('DB_USER', 'subforge')}:{os.getenv('DB_
 JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
 JWT_EXPIRY = os.getenv('JWT_EXPIRY', '24h')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 engine = create_engine(DATABASE_URL)
@@ -185,17 +186,17 @@ class NodeImportRequest(BaseModel):
 def seed_admin():
     db = SessionLocal()
     try:
-        admin = db.query(User).filter(User.username == "admin").first()
+        admin = db.query(User).filter(User.username == ADMIN_USERNAME).first()
         if not admin:
             admin = User(
-                username="admin",
+                username=ADMIN_USERNAME,
                 password=get_password_hash(ADMIN_PASSWORD),
                 role="admin",
                 status=1
             )
             db.add(admin)
             db.commit()
-            print(f"Admin user created with password: {ADMIN_PASSWORD}")
+            print(f"Admin user created: {ADMIN_USERNAME}")
     finally:
         db.close()
 
