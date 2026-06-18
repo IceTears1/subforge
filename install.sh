@@ -198,29 +198,30 @@ interactive_config() {
 
     if [ "$USE_EXISTING_DATA" = true ]; then
         log "使用已有配置"
-    else
-        # Frontend port
-        echo -e "${YELLOW}前端访问端口 [${FRONTEND_PORT}]${NC}"
-        read -p "> " input
-        FRONTEND_PORT="${input:-$FRONTEND_PORT}"
-
-        # Backend port
-        echo -e "${YELLOW}后端 API 端口 [${BACKEND_PORT}]${NC}"
-        read -p "> " input
-        BACKEND_PORT="${input:-$BACKEND_PORT}"
-
-        # Admin username
-        echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
-        read -p "> " input
-        ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
-
-        # Admin password
-        echo -e "${YELLOW}管理员密码 随机生成${NC}"
-        read -p "> " input
-        ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
+        return
     fi
 
-    # Domain configuration (always ask)
+    # Frontend port
+    echo -e "${YELLOW}前端访问端口 [${FRONTEND_PORT}]${NC}"
+    read -p "> " input
+    FRONTEND_PORT="${input:-$FRONTEND_PORT}"
+
+    # Backend port
+    echo -e "${YELLOW}后端 API 端口 [${BACKEND_PORT}]${NC}"
+    read -p "> " input
+    BACKEND_PORT="${input:-$BACKEND_PORT}"
+
+    # Admin username
+    echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
+    read -p "> " input
+    ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
+
+    # Admin password
+    echo -e "${YELLOW}管理员密码 随机生成${NC}"
+    read -p "> " input
+    ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
+
+    # Domain configuration
     echo ""
     echo -e "${DIM}--- 域名/SSL 配置 留空跳过 ---${NC}"
 
