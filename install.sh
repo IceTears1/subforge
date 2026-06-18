@@ -23,7 +23,8 @@ INSTALL_DIR="/opt/subforge"
 VERSION="1.0.1"
 
 # Default values
-PORT=8080
+FRONTEND_PORT=8080
+BACKEND_PORT=8081
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD=""
 DOMAIN=""
@@ -174,10 +175,15 @@ interactive_config() {
     if [ "$USE_EXISTING_DATA" = true ]; then
         log "使用已有配置"
     else
-        # Port
-        echo -e "${YELLOW}访问端口 [${PORT}]${NC}"
+        # Frontend port
+        echo -e "${YELLOW}前端访问端口 [${FRONTEND_PORT}]${NC}"
         read -p "> " input
-        PORT="${input:-$PORT}"
+        FRONTEND_PORT="${input:-$FRONTEND_PORT}"
+
+        # Backend port
+        echo -e "${YELLOW}后端 API 端口 [${BACKEND_PORT}]${NC}"
+        read -p "> " input
+        BACKEND_PORT="${input:-$BACKEND_PORT}"
 
         # Admin username
         echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
@@ -239,7 +245,8 @@ interactive_config() {
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
     echo -e "${CYAN}${BOLD}  📋 配置确认${NC}"
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
-    echo -e "  端口:         ${CYAN}${PORT}${NC}"
+    echo -e "  前端端口:     ${CYAN}${FRONTEND_PORT}${NC}"
+    echo -e "  后端端口:     ${CYAN}${BACKEND_PORT}${NC}"
     echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
     if [ -n "$DOMAIN" ]; then
@@ -292,7 +299,8 @@ generate_config() {
         [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
 
         cat > .env <<EOF
-PORT=${PORT}
+FRONTEND_PORT=${FRONTEND_PORT}
+BACKEND_PORT=${BACKEND_PORT}
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
