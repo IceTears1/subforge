@@ -985,11 +985,12 @@ def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_curren
                 node_data = parse_hysteria2(line)
 
             if node_data:
-                # Check for duplicate server:port
+                # Check for duplicate server:port:type
                 existing = db.query(Node).filter(
                     Node.subscription_id == sub.id,
                     Node.server == node_data.get("server"),
-                    Node.port == node_data.get("port")
+                    Node.port == node_data.get("port"),
+                    Node.node_type == node_data.get("type")
                 ).first()
 
                 if not existing:
