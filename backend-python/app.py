@@ -941,6 +941,73 @@ def get_all_nodes(current_user: User = Depends(get_current_user), db: Session = 
         for n in nodes
     ]
 
+@app.post("/api/nodes/import")
+def import_nodes(uris: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Import individual node URIs (vmess://, vless://, trojan://, ss://, hysteria2://)"""
+    # Find or create "手动导入" subscription
+    sub = db.query(Subscription).filter(
+        Subscription.user_id == current_user.id,
+        Subscription.name == "手动导入"
+    ).first()
+
+    if not sub:
+        sub = Subscription(
+            user_id=current_user.id,
+            token=generate_token(),
+            name="手动导入",
+            url="manual",
+            status=1
+        )
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+
+    # Parse each line
+    lines = [line.strip() for line in uris.strip().split('\n') if line.strip()]
+    imported = 0
+
+    for line in lines:
+        try:
+            node_data = None
+            if line.startswith("vmess://"):
+                node_data = parse_vmess(line)
+            elif line.startswith("vless://"):
+                node_data = parse_vless(line)
+            elif line.startswith("trojan://"):
+                node_data = parse_trojan(line)
+            elif line.startswith("ss://"):
+                node_data = parse_ss(line)
+            elif line.startswith("hysteria2://"):
+                node_data = parse_hysteria2(line)
+
+            if node_data:
+                # Check for duplicate server:port
+                existing = db.query(Node).filter(
+                    Node.subscription_id == sub.id,
+                    Node.server == node_data.get("server"),
+                    Node.port == node_data.get("port")
+                ).first()
+
+                if not existing:
+                    node = Node(
+                        subscription_id=sub.id,
+                        name=node_data.get("name", "unknown"),
+                        display_name=node_data.get("name", "unknown"),
+                        node_type=node_data.get("type", "unknown"),
+                        server=node_data.get("server", ""),
+                        port=node_data.get("port", 0),
+                        region=node_data.get("region", "OTHER"),
+                        config_json=node_data.get("data", {}),
+                        status=1
+                    )
+                    db.add(node)
+                    imported += 1
+        except:
+            continue
+
+    db.commit()
+    return {"imported": imported, "subscription_id": sub.id, "subscription_name": sub.name}
+
 @app.get("/api/subscriptions/{sub_id}/nodes")
 def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()

@@ -29,6 +29,10 @@
               <template #icon><n-icon :component="CloudUploadOutline" /></template>
               导入
             </n-button>
+            <n-button type="info" @click="showNodeImport = true">
+              <template #icon><n-icon :component="AddOutline" /></template>
+              导入节点
+            </n-button>
             <n-button @click="handleExport">
               <template #icon><n-icon :component="CloudDownloadOutline" /></template>
               导出
@@ -106,12 +110,39 @@
       @update:show="showTemplate = $event"
       @create="handleTemplateCreate"
     />
+
+    <!-- Import Nodes Modal -->
+    <n-modal v-model:show="showNodeImport" preset="card" title="导入节点" style="width: 600px">
+      <n-space vertical>
+        <n-text>粘贴节点链接（支持 vmess://、vless://、trojan://、ss://、hysteria2://），每行一个：</n-text>
+        <n-input
+          v-model:value="nodeUris"
+          type="textarea"
+          :rows="10"
+          placeholder="vmess://eyJwb3J0Ijo1MDAxMCwicHMiOi...
+vless://xxxxx@server:443?...
+trojan://password@server:443?..."
+          style="font-family: monospace; font-size: 12px;"
+        />
+        <n-alert v-if="importResult" :type="importResult.success ? 'success' : 'error'">
+          {{ importResult.message }}
+        </n-alert>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showNodeImport = false">取消</n-button>
+          <n-button type="primary" :loading="importingNodes" @click="handleImportNodes">
+            导入
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NInputNumber, NTag, NSelect, NText, NPopconfirm } from 'naive-ui'
+import { useMessage, NCard, NDataTable, NButton, NIcon, NSpace, NModal, NForm, NFormItem, NInput, NInputNumber, NTag, NSelect, NText, NPopconfirm, NAlert } from 'naive-ui'
 import { AddOutline, RefreshOutline, TrashOutline, EyeOutline, CreateOutline, LinkOutline, PulseOutline, ShareOutline, CloudUploadOutline, CloudDownloadOutline, DocumentTextOutline } from '@vicons/ionicons5'
 import ShareModal from '../components/ShareModal.vue'
 import ImportModal from '../components/ImportModal.vue'
@@ -120,7 +151,7 @@ import TemplateModal from '../components/TemplateModal.vue'
 import {
   getSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   refreshSubscription, getNodes, batchDeleteSubscriptions, batchRefreshSubscriptions, checkSubscriptionHealth,
-  exportSubscriptions, batchExportSubscriptions,
+  exportSubscriptions, batchExportSubscriptions, importNodes,
 } from '../api/subscription'
 import type { Subscription, Node } from '../api/subscription'
 
@@ -147,6 +178,10 @@ const showDetail = ref(false)
 const detailSub = ref<Subscription | null>(null)
 const showTemplate = ref(false)
 const refreshingAll = ref(false)
+const showNodeImport = ref(false)
+const nodeUris = ref('')
+const importingNodes = ref(false)
+const importResult = ref<{ success: boolean; message: string } | null>(null)
 
 const form = ref({ name: '', url: '', auto_refresh: 3600 })
 const rules = {
@@ -416,6 +451,38 @@ async function handleExport() {
     URL.revokeObjectURL(url)
     message.success('导出成功')
   } catch { message.error('导出失败') }
+}
+
+async function handleImportNodes() {
+  if (!nodeUris.value.trim()) {
+    importResult.value = { success: false, message: '请输入节点链接' }
+    return
+  }
+
+  importingNodes.value = true
+  importResult.value = null
+
+  try {
+    const res = await importNodes(nodeUris.value)
+    const { imported, subscription_name } = res.data
+    importResult.value = {
+      success: true,
+      message: `成功导入 ${imported} 个节点到「${subscription_name}」`
+    }
+    nodeUris.value = ''
+    await load()
+    setTimeout(() => {
+      showNodeImport.value = false
+      importResult.value = null
+    }, 2000)
+  } catch (e: any) {
+    importResult.value = {
+      success: false,
+      message: e.response?.data?.detail || '导入失败'
+    }
+  } finally {
+    importingNodes.value = false
+  }
 }
 
 onMounted(load)
