@@ -638,7 +638,7 @@ wait_health() {
     local count=0
 
     while [ $count -lt $max ]; do
-        if curl -sf "http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
+        if curl -sf "http://localhost:${FRONTEND_PORT}/api/health" >/dev/null 2>&1; then
             log "服务就绪 (${count}s)"
             return
         fi
