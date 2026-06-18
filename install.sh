@@ -29,6 +29,9 @@ ADMIN_USERNAME="admin"
 ADMIN_PASSWORD=""
 DOMAIN=""
 EMAIL=""
+SSL_PROVIDER=""
+ALI_AK=""
+ALI_SK=""
 USE_EXISTING_DATA=false
 
 log()   { echo -e "${GREEN}[✓]${NC} $1"; }
