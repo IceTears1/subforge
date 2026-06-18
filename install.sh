@@ -115,6 +115,14 @@ load_images() {
     else
         warn "后端镜像不存在，将使用本地构建"
     fi
+
+    # Load frontend image
+    if [ -f "$INSTALL_DIR/images/subforge-frontend.tar.gz" ]; then
+        docker load < "$INSTALL_DIR/images/subforge-frontend.tar.gz"
+        log "前端镜像已加载"
+    else
+        warn "前端镜像不存在，将使用本地构建"
+    fi
 }
 
 generate_config() {
