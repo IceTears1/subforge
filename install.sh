@@ -454,60 +454,51 @@ EOF
 }
 
 setup_aliyun_ssl() {
-    info "使用阿里云 SSL 证书..."
+    info "使用阿里云 DNS API 自动申请 SSL 证书..."
 
     # Create certificate directory
-    CERT_DIR="$INSTALL_DIR/certs/$DOMAIN"
+    CERT_DIR="$INSTALL_DIR/ssl/${DOMAIN}"
     mkdir -p "$CERT_DIR"
 
-    echo ""
-    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
-    echo -e "${CYAN}${BOLD}  阿里云 SSL 证书申请${NC}"
-    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
-    echo ""
-    echo -e "  1. 打开阿里云 SSL 证书控制台"
-    echo -e "     ${CYAN}https://yundun.console.aliyun.com/?p=cas${NC}"
-    echo ""
-    echo -e "  2. 点击「免费证书」→「创建证书」"
-    echo -e "     - 域名: ${CYAN}${DOMAIN}${NC}"
-    echo -e "     - 验证方式: DNS 验证"
-    echo ""
-    echo -e "  3. 添加 DNS TXT 记录（控制台会显示）"
-    echo -e "     等待验证通过（约2-5分钟）"
-    echo ""
-    echo -e "  4. 证书签发后，点击「下载」"
-    echo -e "     选择 ${CYAN}Nginx${NC} 格式"
-    echo ""
-    echo -e "  5. 解压后将以下文件放到服务器:"
-    echo -e "     ${CYAN}/opt/subforge/certs/${DOMAIN}/${NC}"
-    echo -e "     - ${CYAN}${DOMAIN}.pem${NC}"
-    echo -e "     - ${CYAN}${DOMAIN}.key${NC}"
-    echo ""
-    echo -e "  ${DIM}可以用 scp 上传文件:${NC}"
-    echo -e "  ${DIM}scp *.pem *.key root@47.79.87.168:/opt/subforge/certs/${DOMAIN}/${NC}"
-    echo ""
+    # Install acme.sh if not present
+    if ! command -v acme.sh &>/dev/null && [ ! -f ~/.acme.sh/acme.sh ]; then
+        info "安装 acme.sh..."
+        curl -fsSL https://get.acme.sh | sh -s email="$EMAIL"
+        source ~/.acme.sh/acme.sh.env 2>/dev/null || true
+    fi
 
-    # Wait for certificate files
-    MAX_WAIT=600
-    COUNT=0
-    while [ $COUNT -lt $MAX_WAIT ]; do
+    ACME_SH="$HOME/.acme.sh/acme.sh"
+    if [ ! -f "$ACME_SH" ]; then
+        ACME_SH="acme.sh"
+    fi
+
+    # Configure Alibaba Cloud DNS API
+    info "配置阿里云 DNS API..."
+    export Ali_Key="$ALI_AK"
+    export Ali_Secret="$ALI_SK"
+
+    # Issue certificate using DNS API
+    info "申请 SSL 证书..."
+    $ACME_SH --issue \
+        --dns dns_ali \
+        -d "$DOMAIN" \
+        --force 2>&1 | tee /tmp/acme.log
+
+    if [ $? -eq 0 ] || grep -q "Success" /tmp/acme.log 2>/dev/null; then
+        log "SSL 证书申请成功!"
+
+        # Install certificate
+        info "安装证书..."
+        $ACME_SH --install-cert -d "$DOMAIN" \
+            --key-file "$CERT_DIR/${DOMAIN}.key" \
+            --fullchain-file "$CERT_DIR/${DOMAIN}.pem" \
+            --reloadcmd "cd $INSTALL_DIR && docker compose restart nginx" 2>&1
+
         if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
-            log "检测到证书文件!"
-            break
-        fi
+            log "证书已安装到: $CERT_DIR"
 
-        echo -ne "\r${DIM}等待证书文件... ${COUNT}s / ${MAX_WAIT}s ${NC}"
-        sleep 10
-        COUNT=$((COUNT + 10))
-    done
-    echo ""
-
-    # Check if cert files exist
-    if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
-        info "配置 Nginx SSL..."
-
-        # Update nginx config
-        cat > "$INSTALL_DIR/nginx/nginx.conf" <<EOF
+            # Update nginx config with SSL
+            cat > "$INSTALL_DIR/nginx/nginx.conf" <<EOF
 server {
     listen 80;
     server_name ${DOMAIN};
@@ -552,17 +543,29 @@ server {
 }
 EOF
 
-        # Mount certs directory
-        mkdir -p "$INSTALL_DIR/certs"
-        ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
+            # Mount certs directory
+            mkdir -p "$INSTALL_DIR/certs"
+            ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
 
-        # Restart nginx
-        cd "$INSTALL_DIR"
-        docker compose restart nginx
+            # Restart nginx
+            cd "$INSTALL_DIR"
+            docker compose restart nginx
 
-        log "SSL 配置完成!"
+            log "SSL 配置完成!"
+        else
+            warn "证书安装失败"
+        fi
     else
-        warn "证书文件不存在，跳过 SSL 配置"
+        warn "SSL 证书申请失败"
+        cat /tmp/acme.log 2>/dev/null
+    fi
+
+    # Setup auto-renewal
+    info "配置自动续期..."
+    CRON_LINE="0 3 * * * $ACME_SH --cron --home $HOME/.acme.sh > /dev/null 2>&1"
+    if ! crontab -l 2>/dev/null | grep -q "acme.sh"; then
+        (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+        log "已配置自动续期"
     fi
 }
 
