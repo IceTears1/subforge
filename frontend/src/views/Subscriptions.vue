@@ -369,14 +369,13 @@ async function viewNodes(sub: Subscription) {
 async function viewToken(sub: Subscription) {
   currentSub.value = sub
   tokenFormat.value = 'clash'
-  tokenUrl.value = `${window.location.origin}/sub/${sub.token || 'loading'}?target=clash`
+  // Use token directly from subscription object
+  if (sub.token) {
+    tokenUrl.value = `${window.location.origin}/sub/${sub.token}?target=clash`
+  } else {
+    tokenUrl.value = `${window.location.origin}/sub/loading?target=clash`
+  }
   showToken.value = true
-  // Fetch token from API
-  try {
-    const { default: api } = await import('../api/request')
-    const res = await api.get(`/subscriptions/${sub.id}/token`)
-    tokenUrl.value = `${window.location.origin}/sub/${res.data.token}?target=${tokenFormat.value}`
-  } catch { /* use placeholder */ }
 }
 
 function updateTokenUrl(format: string) {
@@ -391,10 +390,17 @@ function copyToken() {
 
 async function openShare(sub: Subscription) {
   try {
-    const { default: api } = await import('../api/request')
-    const res = await api.get(`/subscriptions/${sub.id}/token`)
-    shareToken.value = res.data.token
-    showShare.value = true
+    // Token is already available in the subscription object
+    if (sub.token) {
+      shareToken.value = sub.token
+      showShare.value = true
+    } else {
+      // Fallback: fetch from API if token not available
+      const { default: api } = await import('../api/request')
+      const res = await api.get(`/subscriptions/${sub.id}/token`)
+      shareToken.value = res.data.token
+      showShare.value = true
+    }
   } catch { message.error('获取订阅链接失败') }
 }
 
