@@ -127,6 +127,7 @@ import type { Subscription, Node } from '../api/subscription'
 const message = useMessage()
 const loading = ref(false)
 const saving = ref(false)
+const checkingId = ref<number | null>(null)
 const showForm = ref(false)
 const showNodes = ref(false)
 const showToken = ref(false)
@@ -210,7 +211,7 @@ const columns = [
           h(NButton, { size: 'small', quaternary: true, type: 'success', onClick: () => viewToken(row) }, { icon: () => h(NIcon, { component: LinkOutline }) }),
           h(NButton, { size: 'small', quaternary: true, onClick: () => openShare(row) }, { icon: () => h(NIcon, { component: ShareOutline }) }),
           h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => handleRefresh(row) }, { icon: () => h(NIcon, { component: RefreshOutline }) }),
-          h(NButton, { size: 'small', quaternary: true, onClick: () => handleCheck(row) }, { icon: () => h(NIcon, { component: PulseOutline }), default: () => '检测' }),
+          h(NButton, { size: 'small', quaternary: true, onClick: () => handleCheck(row), loading: checkingId.value === row.id, disabled: checkingId.value !== null && checkingId.value !== row.id }, { icon: () => h(NIcon, { component: PulseOutline }), default: () => checkingId.value === row.id ? '检测中...' : '检测' }),
           h(NPopconfirm, { onPositiveClick: () => handleDelete(row) }, {
             trigger: () => h(NButton, { size: 'small', quaternary: true, type: 'error' }, { icon: () => h(NIcon, { component: TrashOutline }) }),
             default: () => '确认删除？',
@@ -334,11 +335,14 @@ async function handleBatchExport() {
 }
 
 async function handleCheck(sub: Subscription) {
+  checkingId.value = sub.id
   try {
     const res = await checkSubscriptionHealth(sub.id)
     const { total, online, offline } = res.data
     message.success(`检测完成: ${online}/${total} 在线, ${offline} 离线`)
+    await load()
   } catch { message.error('检测失败') }
+  finally { checkingId.value = null }
 }
 
 async function handleTemplateCreate(data: { name: string; url: string; autoRefresh: number; tags: string[] }) {
