@@ -679,7 +679,7 @@ http {
         # API reverse proxy
         location /api/ {
             limit_req zone=api burst=50 nodelay;
-            proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+            proxy_pass http://172.17.0.1:8081;
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -690,7 +690,7 @@ http {
         # Client subscription endpoint
         location /sub/ {
             limit_req zone=api burst=20 nodelay;
-            proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+            proxy_pass http://172.17.0.1:8081;
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
         }
@@ -705,6 +705,9 @@ http {
 EOF
         log "Nginx 配置已创建"
     fi
+
+    # Always update nginx config with current BACKEND_PORT
+    sed -i "s/proxy_pass http:\/\/172.17.0.1:[0-9]*/proxy_pass http:\/\/172.17.0.1:${BACKEND_PORT:-8081}/g" "$INSTALL_DIR/nginx/nginx-python.conf" 2>/dev/null || true
 }
 
 check_containers() {
