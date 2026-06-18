@@ -20,7 +20,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 # Fixed port scheme
 FRONTEND_PORT=3001
