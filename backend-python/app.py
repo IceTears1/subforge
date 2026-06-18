@@ -1010,6 +1010,9 @@ def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_curren
         except:
             continue
 
+    # Commit all nodes first
+    db.commit()
+
     # Update node count
     if imported > 0:
         sub.node_count = db.query(Node).filter(Node.subscription_id == sub.id).count()
