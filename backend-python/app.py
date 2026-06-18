@@ -18,7 +18,7 @@ def get_utc_time():
     return datetime.utcnow()
 from typing import Optional, List
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON
@@ -942,7 +942,7 @@ def get_all_nodes(current_user: User = Depends(get_current_user), db: Session = 
     ]
 
 @app.post("/api/nodes/import")
-def import_nodes(uris: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def import_nodes(uris: str = Body(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Import individual node URIs (vmess://, vless://, trojan://, ss://, hysteria2://)"""
     # Find or create "手动导入" subscription
     sub = db.query(Subscription).filter(
