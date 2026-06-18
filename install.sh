@@ -201,15 +201,33 @@ interactive_config() {
     DOMAIN="${input:-$EXISTING_DOMAIN}"
 
     if [ -n "$DOMAIN" ]; then
-        # Check if email already configured
-        EXISTING_EMAIL=$(grep -oP 'EMAIL=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
-        if [ -n "$EXISTING_EMAIL" ]; then
-            echo -e "${YELLOW}邮箱 [${EXISTING_EMAIL}]${NC}"
+        # SSL provider selection
+        echo ""
+        echo -e "${YELLOW}SSL 证书来源:${NC}"
+        echo -e "  1) Let's Encrypt (免费)"
+        echo -e "  2) 阿里云 SSL 证书"
+        echo -e "  3) 跳过 SSL 配置"
+        read -p "> " ssl_choice
+        SSL_PROVIDER="${ssl_choice:-1}"
+
+        if [ "$SSL_PROVIDER" = "2" ]; then
+            # Alibaba Cloud SSL
+            echo ""
+            echo -e "${YELLOW}阿里云 AccessKey ID${NC}"
+            read -p "> " ALI_AK
+            echo -e "${YELLOW}阿里云 AccessKey Secret${NC}"
+            read -p "> " ALI_SK
         else
-            echo -e "${YELLOW}邮箱 用于SSL证书${NC}"
+            # Let's Encrypt
+            EXISTING_EMAIL=$(grep -oP 'EMAIL=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
+            if [ -n "$EXISTING_EMAIL" ]; then
+                echo -e "${YELLOW}邮箱 [${EXISTING_EMAIL}]${NC}"
+            else
+                echo -e "${YELLOW}邮箱 用于SSL证书${NC}"
+            fi
+            read -p "> " input
+            EMAIL="${input:-$EXISTING_EMAIL}"
         fi
-        read -p "> " input
-        EMAIL="${input:-$EXISTING_EMAIL}"
     fi
 
     # Confirm
@@ -220,7 +238,14 @@ interactive_config() {
     echo -e "  端口:         ${CYAN}${PORT}${NC}"
     echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
-    [ -n "$DOMAIN" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
+    if [ -n "$DOMAIN" ]; then
+        echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
+        case "${SSL_PROVIDER:-}" in
+            1) echo -e "  SSL:          ${CYAN}Let's Encrypt${NC}" ;;
+            2) echo -e "  SSL:          ${CYAN}阿里云证书${NC}" ;;
+            *) echo -e "  SSL:          ${CYAN}跳过${NC}" ;;
+        esac
+    fi
     [ -n "$EMAIL" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
     echo ""
 
@@ -293,12 +318,38 @@ build_frontend() {
 }
 
 setup_ssl() {
-    if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
+    if [ -z "$DOMAIN" ]; then
         return
     fi
 
     echo ""
     info "配置域名和 SSL..."
+
+    # Update nginx config
+    cd "$INSTALL_DIR"
+    if [ -f nginx/nginx-ssl.conf ]; then
+        cp nginx/nginx-ssl.conf nginx/nginx.conf
+        sed -i "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf 2>/dev/null || \
+            sed -i '' "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf
+    fi
+
+    if [ "$SSL_PROVIDER" = "2" ] && [ -n "$ALI_AK" ] && [ -n "$ALI_SK" ]; then
+        # Alibaba Cloud SSL
+        setup_aliyun_ssl
+    elif [ "$SSL_PROVIDER" = "1" ] && [ -n "$EMAIL" ]; then
+        # Let's Encrypt
+        setup_letsencrypt_ssl
+    else
+        warn "跳过 SSL 配置"
+    fi
+
+    # Restart all services
+    cd "$INSTALL_DIR"
+    docker compose up -d
+}
+
+setup_letsencrypt_ssl() {
+    info "使用 Let's Encrypt..."
 
     # Install certbot
     if ! command -v certbot &>/dev/null; then
@@ -310,29 +361,17 @@ setup_ssl() {
             yum install -y -q epel-release 2>/dev/null || true
             yum install -y -q certbot python3-certbot-nginx
         else
-            warn "无法自动安装 certbot，请手动安装后运行: setup-ssl.sh"
+            warn "无法自动安装 certbot"
             return
         fi
     fi
 
-    # Update nginx config
-    cd "$INSTALL_DIR"
-    if [ -f nginx/nginx-ssl.conf ]; then
-        cp nginx/nginx-ssl.conf nginx/nginx.conf
-        sed -i "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf 2>/dev/null || \
-            sed -i '' "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf
-    fi
-
-    # Get SSL certificate
-    info "申请 SSL 证书..."
-
-    # Stop nginx and wait for port 80 to be released
+    # Stop services
     docker compose down 2>/dev/null || true
     sleep 3
 
-    # Check if port 80 is still in use
-    if lsof -i :80 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep -q ":80 "; then
-        warn "端口 80 仍被占用，尝试强制释放..."
+    # Free port 80
+    if lsof -i :80 >/dev/null 2>&1; then
         fuser -k 80/tcp 2>/dev/null || true
         sleep 2
     fi
@@ -340,32 +379,104 @@ setup_ssl() {
     if certbot certonly --standalone \
         -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive; then
         log "SSL 证书申请成功"
-    else
-        warn "SSL 证书申请失败，请确保域名已解析到本机 IP"
-        # Restart services
-        cd "$INSTALL_DIR"
-        docker compose up -d
-        return
-    fi
 
-    # Setup auto-renewal
-    HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
-    mkdir -p "$HOOK_DIR"
-    cat > "$HOOK_DIR/restart-nginx.sh" <<'EOF'
+        # Setup auto-renewal
+        HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
+        mkdir -p "$HOOK_DIR"
+        cat > "$HOOK_DIR/restart-nginx.sh" <<'EOF'
 #!/bin/bash
 cd /opt/subforge && docker compose restart nginx 2>/dev/null || true
 EOF
-    chmod +x "$HOOK_DIR/restart-nginx.sh"
+        chmod +x "$HOOK_DIR/restart-nginx.sh"
 
-    CRON_LINE="0 3,15 * * * certbot renew --quiet --deploy-hook '/etc/letsencrypt/renewal-hooks/deploy/restart-nginx.sh'"
-    if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
-        (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+        CRON_LINE="0 3,15 * * * certbot renew --quiet --deploy-hook '/etc/letsencrypt/renewal-hooks/deploy/restart-nginx.sh'"
+        if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+            (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+        fi
+    else
+        warn "SSL 证书申请失败，请确保域名已解析到本机 IP"
+    fi
+}
+
+setup_aliyun_ssl() {
+    info "使用阿里云 SSL 证书..."
+
+    # Install aliyun-cli
+    if ! command -v aliyun &>/dev/null; then
+        warn "安装阿里云 CLI..."
+        curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz | tar xz -C /usr/local/bin/
+        chmod +x /usr/local/bin/aliyun
     fi
 
-    # Restart all services
-    cd "$INSTALL_DIR"
-    docker compose up -d
-    log "SSL 配置完成"
+    # Configure aliyun cli
+    aliyun configure set --profile subforge \
+        --mode AK \
+        --access-key-id "$ALI_AK" \
+        --access-key-secret "$ALI_SK" \
+        --region cn-hangzhou 2>/dev/null || true
+
+    # Create certificate directory
+    CERT_DIR="$INSTALL_DIR/certs/$DOMAIN"
+    mkdir -p "$CERT_DIR"
+
+    echo ""
+    echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+    echo -e "${YELLOW}  阿里云 SSL 证书申请步骤${NC}"
+    echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  1. 请登录阿里云控制台"
+    echo -e "     ${CYAN}https://yundun.console.aliyun.com/?p=cas${NC}"
+    echo ""
+    echo -e "  2. 免费申请 SSL 证书"
+    echo -e "     - 域名: ${CYAN}${DOMAIN}${NC}"
+    echo -e "     - 验证方式: DNS 验证"
+    echo ""
+    echo -e "  3. 证书签发后，下载 Nginx 格式证书"
+    echo ""
+    echo -e "  4. 将证书文件放到: ${CYAN}${CERT_DIR}/${NC}"
+    echo -e "     - ${CYAN}${DOMAIN}.pem${NC} (证书文件)"
+    echo -e "     - ${CYAN}${DOMAIN}.key${NC} (私钥文件)"
+    echo ""
+
+    read -p "$(echo -e ${YELLOW}证书文件已准备好? [Y/n]: ${NC})" cert_ready
+
+    if [[ ! "$cert_ready" =~ ^[Nn]$ ]]; then
+        # Update nginx config for Alibaba Cloud SSL
+        cat > "$INSTALL_DIR/nginx/nginx.conf" <<EOF
+server {
+    listen 80;
+    server_name ${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/${DOMAIN}.pem;
+    ssl_certificate_key /etc/nginx/certs/${DOMAIN}.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://backend:8081;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+        # Update docker-compose to mount certs
+        # Create symlink for nginx
+        mkdir -p "$INSTALL_DIR/certs"
+        ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
+
+        log "阿里云 SSL 配置完成"
+    else
+        warn "跳过证书配置"
+    fi
 }
 
 start_services() {
