@@ -216,12 +216,53 @@ get_public_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
 }
 
+load_old_config() {
+    # Check if old config exists
+    if [ -f "$INSTALL_DIR/.env" ]; then
+        log "检测到旧的配置文件"
+        source "$INSTALL_DIR/.env" 2>/dev/null || true
+
+        OLD_PORT="${PORT:-}"
+        OLD_ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+        OLD_ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+        OLD_DB_PASSWORD="${DB_PASSWORD:-}"
+
+        if [ -n "$OLD_PORT" ] || [ -n "$OLD_ADMIN_USERNAME" ] || [ -n "$OLD_ADMIN_PASSWORD" ]; then
+            echo ""
+            echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+            echo -e "${YELLOW}${BOLD}  📋 检测到旧配置${NC}"
+            echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+            [ -n "$OLD_PORT" ] && echo -e "  端口:         ${CYAN}${OLD_PORT}${NC}"
+            [ -n "$OLD_ADMIN_USERNAME" ] && echo -e "  管理员账户:   ${CYAN}${OLD_ADMIN_USERNAME}${NC}"
+            [ -n "$OLD_ADMIN_PASSWORD" ] && echo -e "  管理员密码:   ${CYAN}${OLD_ADMIN_PASSWORD}${NC}"
+            [ -n "$OLD_DB_PASSWORD" ] && echo -e "  数据库密码:   ${CYAN}${OLD_DB_PASSWORD}${NC}"
+            echo ""
+
+            read -p "$(echo -e ${YELLOW}是否使用旧配置? [Y/n]: ${NC})" use_old
+            if [[ ! "$use_old" =~ ^[Nn]$ ]]; then
+                log "使用旧配置"
+                USE_OLD_CONFIG=true
+                return
+            fi
+        fi
+    fi
+    USE_OLD_CONFIG=false
+}
+
 interactive_config() {
     echo ""
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
     echo -e "${CYAN}${BOLD}  ⚙️  配置安装参数${NC}"
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
+
+    # Load old config if exists
+    load_old_config
+
+    if [ "$USE_OLD_CONFIG" = true ]; then
+        log "已采用旧配置，跳过配置输入"
+        return
+    fi
 
     # Port
     read -p "$(echo -e ${YELLOW}访问端口 [${PORT}]: ${NC})" input_port
