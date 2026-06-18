@@ -466,15 +466,51 @@ setup_aliyun_ssl() {
         if [ -n "$DNS_NAME" ] && [ -n "$DNS_VALUE" ]; then
             echo ""
             echo -e "${YELLOW}═══════════════════════════════════════${NC}"
-            echo -e "${YELLOW}  请添加以下 DNS 解析记录${NC}"
+            echo -e "${YELLOW}  DNS 验证记录${NC}"
             echo -e "${YELLOW}═══════════════════════════════════════${NC}"
             echo ""
             echo -e "  记录类型: ${CYAN}TXT${NC}"
             echo -e "  主机记录: ${CYAN}${DNS_NAME}${NC}"
             echo -e "  记录值:   ${CYAN}${DNS_VALUE}${NC}"
             echo ""
-            echo -e "  ${DIM}请在阿里云域名管理中添加此 TXT 记录${NC}"
-            echo -e "  ${DIM}添加后等待验证通过（通常需要几分钟）${NC}"
+
+            # Auto add DNS record
+            info "自动添加 DNS TXT 记录..."
+
+            # Get main domain name (e.g., xxice.cn from vpn.xxice.cn)
+            MAIN_DOMAIN=$(echo "$DOMAIN" | awk -F. '{print $(NF-1)"."$NF}')
+
+            # Get hosted zone ID
+            ZONE_ID=$(aliyun alidns DescribeDomainRecords \
+                --profile subforge \
+                --DomainName "$MAIN_DOMAIN" \
+                --Type "TXT" 2>/dev/null | grep -o '"ZoneId": *"[^"]*"' | head -1 | cut -d'"' -f4)
+
+            if [ -z "$ZONE_ID" ]; then
+                # Try to get zone ID another way
+                ZONE_ID=$(aliyun alidns DescribeDomains \
+                    --profile subforge 2>/dev/null | grep -B5 -A5 "\"DomainName\": \"$MAIN_DOMAIN\"" | grep -o '"ZoneId": *"[^"]*"' | cut -d'"' -f4)
+            fi
+
+            if [ -n "$ZONE_ID" ]; then
+                # Add TXT record
+                ADD_RESULT=$(aliyun alidns AddDomainRecord \
+                    --profile subforge \
+                    --ZoneId "$ZONE_ID" \
+                    --RR "$DNS_NAME" \
+                    --Type "TXT" \
+                    --Value "$DNS_VALUE" 2>/dev/null)
+
+                RECORD_ID=$(echo "$ADD_RESULT" | grep -o '"RecordId": *"[^"]*"' | cut -d'"' -f4)
+
+                if [ -n "$RECORD_ID" ]; then
+                    log "DNS TXT 记录已自动添加! (Record ID: $RECORD_ID)"
+                else
+                    warn "自动添加 DNS 记录失败，请手动添加"
+                fi
+            else
+                warn "未找到域名托管区，请手动添加 DNS 记录"
+            fi
             echo ""
 
             # Wait for validation
