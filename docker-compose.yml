@@ -53,7 +53,7 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8080}:80"
-      - "443:443"
+      - "${SSL_PORT:-443}:443"
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-8081}
       - DOMAIN=${DOMAIN:-}
