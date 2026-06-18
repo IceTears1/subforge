@@ -1,3 +1,17 @@
+# ========================================
+# SubForge Docker Compose
+# ========================================
+# 端口配置说明：
+#   FRONTEND_PORT  - 前端 HTTP 访问端口（默认 3001）
+#   BACKEND_PORT   - 后端 API 端口（默认 3002，host 网络模式）
+#   SSL_PORT       - HTTPS 端口（默认 443，需要 SSL 证书）
+#   5432           - PostgreSQL 数据库端口
+#
+# 访问地址：
+#   HTTP:  http://YOUR_IP:FRONTEND_PORT
+#   HTTPS: https://YOUR_DOMAIN:SSL_PORT（配置 SSL 后）
+# ========================================
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -37,12 +51,12 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-subforge123}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
-      BACKEND_PORT: ${BACKEND_PORT:-8081}
+      BACKEND_PORT: ${BACKEND_PORT:-3002}
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import httpx, os; httpx.get(f'http://localhost:{os.getenv(\\\"BACKEND_PORT\\\", \\\"8081\\\")}/api/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import httpx, os; httpx.get(f'http://localhost:{os.getenv(\\\"BACKEND_PORT\\\", \\\"3002\\\")}/api/health')\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -52,10 +66,10 @@ services:
     container_name: subforge-nginx
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-3001}:80"
       - "${SSL_PORT:-443}:443"
     environment:
-      - BACKEND_PORT=${BACKEND_PORT:-8081}
+      - BACKEND_PORT=${BACKEND_PORT:-3002}
       - DOMAIN=${DOMAIN:-}
     volumes:
       - ./certs:/etc/nginx/certs:ro
