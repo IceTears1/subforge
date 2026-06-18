@@ -1008,7 +1008,11 @@ def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_curren
         except:
             continue
 
-    db.commit()
+    # Update node count
+    if imported > 0:
+        sub.node_count = db.query(Node).filter(Node.subscription_id == sub.id).count()
+        db.commit()
+
     return {"imported": imported, "subscription_id": sub.id, "subscription_name": sub.name}
 
 @app.get("/api/subscriptions/{sub_id}/nodes")
