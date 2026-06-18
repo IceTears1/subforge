@@ -45,8 +45,7 @@ show_status() {
     docker compose ps
     echo ""
     echo -e "${CYAN}${BOLD}访问地址:${NC}"
-    source .env 2>/dev/null || true
-    echo -e "  http://localhost:${PORT:-8080}"
+    echo -e "  http://localhost:3001"
     echo ""
 }
 

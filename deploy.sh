@@ -31,7 +31,10 @@ if [ ! -f .env ]; then
     ADMIN_PASSWORD=$(generate_secret | head -c 16)
 
     cat > .env << EOF
-PORT=8080
+FRONTEND_PORT=3001
+BACKEND_PORT=45001
+DB_PORT=45000
+SSL_PORT=443
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
@@ -63,13 +66,12 @@ sleep 5
 
 # Check status
 if docker compose ps | grep -q "Up"; then
-    PORT=$(grep PORT .env | cut -d'=' -f2 || echo "8080")
     echo ""
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}  SubForge deployed successfully!${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo -e "  URL:      ${CYAN}http://localhost:${PORT}${NC}"
+    echo -e "  URL:      ${CYAN}http://localhost:3001${NC}"
     echo -e "  Username: ${CYAN}admin${NC}"
     if [ -n "${ADMIN_PASSWORD}" ]; then
         echo -e "  Password: ${CYAN}${ADMIN_PASSWORD}${NC}"

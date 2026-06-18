@@ -30,7 +30,7 @@ echo -e "${NC}"
 # ─────────────────────────────────────
 REPO_URL="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-DEFAULT_PORT="8080"
+DEFAULT_PORT="3001"
 
 # ─────────────────────────────────────
 # Input
@@ -163,7 +163,10 @@ if [ ! -f .env ]; then
     ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
     cat > .env <<EOF
-PORT=${SERVICE_PORT}
+FRONTEND_PORT=3001
+BACKEND_PORT=45001
+DB_PORT=45000
+SSL_PORT=443
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
@@ -183,10 +186,8 @@ EOF
     echo "    Password: ${ADMIN_PASSWORD}"
     echo "  ========================================"
 else
-    # Update port if changed
-    sed -i "s/^PORT=.*/PORT=${SERVICE_PORT}/" .env
     ADMIN_PASSWORD=$(grep ADMIN_PASSWORD .env | cut -d'=' -f2)
-    echo "  .env exists, port updated to ${SERVICE_PORT}"
+    echo "  .env exists"
 fi
 
 echo "[6/6] Starting services..."
@@ -198,14 +199,14 @@ echo "  Waiting for services..."
 WAIT_COUNT=0
 WAIT_MAX=30
 while [ $WAIT_COUNT -lt $WAIT_MAX ]; do
-    if curl -sf "http://localhost:${SERVICE_PORT}/api/health" >/dev/null 2>&1; then
+    if curl -sf "http://localhost:3001/api/health" >/dev/null 2>&1; then
         break
     fi
     sleep 2
     WAIT_COUNT=$((WAIT_COUNT + 1))
 done
 
-if curl -sf "http://localhost:${SERVICE_PORT}/api/health" >/dev/null 2>&1; then
+if curl -sf "http://localhost:3001/api/health" >/dev/null 2>&1; then
     PUBLIC_IP=$(curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || \
                 curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null || \
                 hostname -I | awk '{print $1}')
@@ -214,7 +215,7 @@ if curl -sf "http://localhost:${SERVICE_PORT}/api/health" >/dev/null 2>&1; then
     echo "  SubForge deployed successfully!"
     echo "  ========================================"
     echo ""
-    echo "  URL:      http://${PUBLIC_IP}:${SERVICE_PORT}"
+    echo "  URL:      http://${PUBLIC_IP}:3001"
     echo "  Username: admin"
     echo "  Password: ${ADMIN_PASSWORD}"
     echo ""
@@ -243,7 +244,7 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  VPS Deploy Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "  URL:  ${CYAN}http://${VPS_IP}:${SERVICE_PORT}${NC}"
+echo -e "  URL:  ${CYAN}http://${VPS_IP}:3001${NC}"
 echo ""
 echo -e "  ${YELLOW}Manage:${NC}"
 echo -e "    SSH:    ${CYAN}ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_IP}${NC}"

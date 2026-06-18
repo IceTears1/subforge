@@ -1853,5 +1853,5 @@ def get_audit(current_user: User = Depends(require_admin), db: Session = Depends
 # ─── Run ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv('BACKEND_PORT', '8081'))
+    port = int(os.getenv('BACKEND_PORT', '45001'))
     uvicorn.run(app, host="0.0.0.0", port=port)

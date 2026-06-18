@@ -13,11 +13,8 @@ NC='\033[0m'
 
 INSTALL_DIR="/opt/subforge"
 
-# Source .env to get PORT if not passed as argument
-if [ -z "$1" ] && [ -f "$INSTALL_DIR/.env" ]; then
-    PORT=$(grep -E '^PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
-fi
-PORT=${1:-${PORT:-8080}}
+# Fixed port scheme
+PORT=3001
 BASE_URL="http://localhost:${PORT}"
 
 echo -e "${CYAN}SubForge Health Check${NC}"

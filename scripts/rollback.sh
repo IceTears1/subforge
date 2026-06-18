@@ -13,11 +13,8 @@ NC='\033[0m'
 
 INSTALL_DIR="/opt/subforge"
 
-# Source .env to get PORT
-if [ -f "$INSTALL_DIR/.env" ]; then
-    PORT=$(grep -E '^PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
-fi
-PORT=${PORT:-8080}
+# Fixed port
+PORT=3001
 
 echo -e "${CYAN}SubForge Rollback${NC}"
 echo "=================="

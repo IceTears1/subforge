@@ -46,10 +46,8 @@ ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "cd ${INSTALL_DIR} && docker compose down 
 
 echo -e "${YELLOW}[4/4] Verifying...${NC}"
 sleep 5
-PORT=$(ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "grep -E '^PORT=' ${INSTALL_DIR}/.env | cut -d'=' -f2" 2>/dev/null || echo "8080")
-PORT=${PORT:-8080}
 
-if ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "curl -sf http://localhost:${PORT}/api/health" >/dev/null 2>&1; then
+if ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "curl -sf http://localhost:3001/api/health" >/dev/null 2>&1; then
     echo -e "  ${GREEN}✓ Health check passed${NC}"
 else
     echo -e "  ${YELLOW}⚠ Health check not passed yet, check logs:${NC}"
@@ -58,4 +56,4 @@ fi
 
 echo ""
 echo -e "${GREEN}Update complete!${NC}"
-echo -e "URL: ${CYAN}http://${VPS_IP}:${PORT}${NC}"
+echo -e "URL: ${CYAN}http://${VPS_IP}:3001${NC}"
