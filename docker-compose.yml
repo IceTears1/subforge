@@ -92,8 +92,7 @@ services:
     profiles:
       - proxy
     ports:
-      - "80:80"
-      - "443:443"
+      - "${SSL_PORT:-3003}:443"
     environment:
       - DOMAIN=${DOMAIN:-}
     volumes:

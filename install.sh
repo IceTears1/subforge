@@ -429,20 +429,10 @@ http {
     sendfile      on;
     keepalive_timeout 65;
 
-    # Rate limiting
-    limit_req_zone \$binary_remote_addr zone=api:10m rate=30r/s;
-
-    # HTTP -> HTTPS redirect
-    server {
-        listen 80;
-        server_name ${DOMAIN};
-        return 301 https://\$host\$request_uri;
-    }
-
-    # HTTPS server
+    # HTTPS server (端口 ${SSL_PORT} 映射到容器内 443)
     server {
         listen 443 ssl;
-        server_name ${DOMAIN};
+        server_name _;
 
         # SSL certificates
         ssl_certificate /etc/nginx/certs/${DOMAIN}.pem;
