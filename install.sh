@@ -564,9 +564,15 @@ setup_aliyun_ssl() {
         source ~/.acme.sh/acme.sh.env 2>/dev/null || true
     fi
 
+    # Register account if not registered
     ACME_SH="$HOME/.acme.sh/acme.sh"
     if [ ! -f "$ACME_SH" ]; then
         ACME_SH="acme.sh"
+    fi
+
+    if ! "$ACME_SH" --list | grep -q "$EMAIL" 2>/dev/null; then
+        info "注册 acme.sh 账号..."
+        "$ACME_SH" --register-account -m "$EMAIL"
     fi
 
     # Configure Alibaba Cloud DNS API
