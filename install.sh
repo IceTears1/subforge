@@ -214,6 +214,33 @@ get_public_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
 }
 
+interactive_config() {
+    echo ""
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  ⚙️  配置安装参数${NC}"
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo ""
+
+    # Port
+    read -p "$(echo -e ${YELLOW}访问端口 [${PORT}]: ${NC})" input_port
+    PORT="${input_port:-$PORT}"
+
+    # Admin password
+    read -p "$(echo -e ${YELLOW}管理员密码 [随机生成]: ${NC})" input_password
+    ADMIN_PASSWORD="${input_password:-$(gen_pass 16)}"
+
+    echo ""
+    log "配置确认:"
+    echo -e "  端口:       ${CYAN}${PORT}${NC}"
+    echo -e "  管理员密码: ${CYAN}${ADMIN_PASSWORD}${NC}"
+    echo ""
+
+    read -p "$(echo -e ${YELLOW}确认开始安装? [Y/n]: ${NC})" confirm
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        error "安装已取消"
+    fi
+}
+
 main() {
     echo ""
     echo -e "${CYAN}${BOLD}"
@@ -224,10 +251,14 @@ main() {
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
     echo -e "  ${BOLD}一键安装脚本 (日本 ECS 兼容版)${NC}"
+    echo -e "  ${DIM}版本 1.0.1${NC}"
     echo ""
 
     check_root
     detect_os
+
+    # Interactive configuration
+    interactive_config
 
     # Install dependencies
     install_docker
