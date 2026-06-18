@@ -523,9 +523,12 @@ setup_letsencrypt_ssl() {
         cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "$CERT_DIR/${DOMAIN}.pem"
         cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "$CERT_DIR/${DOMAIN}.key"
 
-        # Create symlink for nginx to mount
+        # Copy certificates for nginx proxy
         mkdir -p "$INSTALL_DIR/certs"
-        ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
+        cp "$CERT_DIR/${DOMAIN}.pem" "$INSTALL_DIR/certs/${DOMAIN}.pem"
+        cp "$CERT_DIR/${DOMAIN}.key" "$INSTALL_DIR/certs/${DOMAIN}.key"
+        chmod 644 "$INSTALL_DIR/certs/${DOMAIN}.pem"
+        chmod 600 "$INSTALL_DIR/certs/${DOMAIN}.key"
 
         # Add DOMAIN to .env
         if ! grep -q "^DOMAIN=" "$INSTALL_DIR/.env"; then
@@ -607,9 +610,12 @@ setup_aliyun_ssl() {
         if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
             log "证书已安装到: $CERT_DIR"
 
-            # Create symlink for nginx to mount
+            # Copy certificates for nginx proxy
             mkdir -p "$INSTALL_DIR/certs"
-            ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
+            cp "$CERT_DIR/${DOMAIN}.pem" "$INSTALL_DIR/certs/${DOMAIN}.pem"
+            cp "$CERT_DIR/${DOMAIN}.key" "$INSTALL_DIR/certs/${DOMAIN}.key"
+            chmod 644 "$INSTALL_DIR/certs/${DOMAIN}.pem"
+            chmod 600 "$INSTALL_DIR/certs/${DOMAIN}.key"
 
             # Add DOMAIN to .env
             if ! grep -q "^DOMAIN=" "$INSTALL_DIR/.env"; then
