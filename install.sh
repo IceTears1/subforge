@@ -713,7 +713,7 @@ main() {
     if [ -n "$DOMAIN" ]; then
         echo -e "    ${CYAN}https://${DOMAIN}${NC}"
     else
-        echo -e "    ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
+        echo -e "    ${CYAN}http://${PUBLIC_IP}:${FRONTEND_PORT}${NC}"
     fi
     echo ""
     echo -e "  ${BOLD}登录信息:${NC}"
