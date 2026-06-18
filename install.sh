@@ -345,12 +345,21 @@ EOF
 start_services() {
     info "启动服务..."
 
-    # Ensure we're in the correct directory
+    # Debug: show current directory and target
+    echo -e "${DIM}当前目录: $(pwd)${NC}"
+    echo -e "${DIM}目标目录: ${INSTALL_DIR}${NC}"
+
+    # Check if docker-compose.yml exists
     if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
-        error "找不到 docker-compose.yml: $INSTALL_DIR"
+        echo -e "${RED}文件不存在: $INSTALL_DIR/docker-compose.yml${NC}"
+        ls -la "$INSTALL_DIR" 2>/dev/null || echo "目录不存在"
+        error "找不到 docker-compose.yml"
     fi
 
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || error "无法进入目录"
+
+    echo -e "${DIM}进入目录: $(pwd)${NC}"
+    echo -e "${DIM}文件列表: $(ls docker-compose.yml)${NC}"
 
     docker compose down --remove-orphans 2>/dev/null || true
     docker compose up -d
