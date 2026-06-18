@@ -126,6 +126,10 @@ check_existing_install() {
         echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME:-admin}${NC}"
         echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD:-****}${NC}"
         [ -n "${DB_PASSWORD:-}" ] && echo -e "  数据库密码:   ${CYAN}${DB_PASSWORD}${NC}"
+        [ -n "${DOMAIN:-}" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
+        [ -n "${EMAIL:-}" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
+        [ -n "${ALI_AK:-}" ] && echo -e "  阿里云 AK:    ${CYAN}${ALI_AK:0:8}****${NC}"
+        [ -n "${ALI_SK:-}" ] && echo -e "  阿里云 SK:    ${CYAN}${ALI_SK:0:4}****${NC}"
         echo ""
 
         echo -e "${YELLOW}是否使用已有配置和数据? [Y/n]${NC}"
@@ -295,6 +299,10 @@ DB_PASSWORD=${DB_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
 ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
+DOMAIN=${DOMAIN:-}
+EMAIL=${EMAIL:-}
+ALI_AK=${ALI_AK:-}
+ALI_SK=${ALI_SK:-}
 EOF
     fi
 
