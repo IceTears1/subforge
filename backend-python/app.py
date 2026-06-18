@@ -1652,19 +1652,88 @@ def generate_singbox_json(nodes: list) -> str:
     return json.dumps(config, ensure_ascii=False, indent=2)
 
 def generate_base64_subscription(nodes: list) -> str:
-    """Generate base64 encoded subscription"""
+    """Generate base64 encoded subscription for Shadowrocket/V2Ray"""
     import base64
+    import json
 
     lines = []
     for node in nodes:
-        if node.node_type == "vless":
-            lines.append(f"vless://{node.server}:{node.port}")
-        elif node.node_type == "vmess":
-            lines.append(f"vmess://{node.server}:{node.port}")
-        elif node.node_type == "trojan":
-            lines.append(f"trojan://{node.server}:{node.port}")
-        elif node.node_type == "ss":
-            lines.append(f"ss://{node.server}:{node.port}")
+        try:
+            config = node.config_json
+            if isinstance(config, str):
+                config = json.loads(config)
+
+            if node.node_type == "vless":
+                # vless://uuid@server:port?params#name
+                uuid = config.get("id", config.get("uuid", ""))
+                params = []
+                if config.get("tls") == "tls":
+                    params.append("security=tls")
+                    if config.get("sni"):
+                        params.append(f"sni={config['sni']}")
+                if config.get("net"):
+                    params.append(f"type={config['net']}")
+                if config.get("path"):
+                    params.append(f"path={config['path']}")
+                if config.get("host"):
+                    params.append(f"host={config['host']}")
+                if config.get("fp"):
+                    params.append(f"fp={config['fp']}")
+                if config.get("flow"):
+                    params.append(f"flow={config['flow']}")
+                query = "&".join(params)
+                name = config.get("ps", node.name or node.display_name or "Unknown")
+                lines.append(f"vless://{uuid}@{node.server}:{node.port}?{query}#{name}")
+
+            elif node.node_type == "vmess":
+                # vmess://base64(json)
+                vmess_config = {
+                    "v": "2",
+                    "ps": config.get("ps", node.name or node.display_name or "Unknown"),
+                    "add": config.get("add", node.server),
+                    "port": str(node.port),
+                    "id": config.get("id", ""),
+                    "aid": str(config.get("aid", 0)),
+                    "net": config.get("net", "tcp"),
+                    "type": config.get("type", "none"),
+                    "host": config.get("host", ""),
+                    "path": config.get("path", ""),
+                    "tls": config.get("tls", ""),
+                    "sni": config.get("sni", ""),
+                    "alpn": config.get("alpn", ""),
+                    "fp": config.get("fp", ""),
+                }
+                vmess_json = json.dumps(vmess_config, separators=(',', ':'))
+                lines.append(f"vmess://{base64.b64encode(vmess_json.encode()).decode()}")
+
+            elif node.node_type == "trojan":
+                # trojan://password@server:port?params#name
+                password = config.get("password", "")
+                params = []
+                if config.get("sni"):
+                    params.append(f"sni={config['sni']}")
+                if config.get("peer"):
+                    params.append(f"peer={config['peer']}")
+                query = "&".join(params)
+                name = config.get("ps", node.name or node.display_name or "Unknown")
+                lines.append(f"trojan://{password}@{node.server}:{node.port}?{query}#{name}")
+
+            elif node.node_type == "ss":
+                # ss://base64(method:password)@server:port#name
+                method = config.get("method", config.get("cipher", "aes-256-gcm"))
+                password = config.get("password", "")
+                name = config.get("ps", node.name or node.display_name or "Unknown")
+                encoded = base64.b64encode(f"{method}:{password}".encode()).decode()
+                lines.append(f"ss://{encoded}@{node.server}:{node.port}#{name}")
+
+            else:
+                # 尝试使用 raw_uri
+                if node.raw_uri:
+                    lines.append(node.raw_uri)
+
+        except Exception as e:
+            # 如果解析失败，跳过该节点
+            continue
 
     content = "\n".join(lines)
     return base64.b64encode(content.encode()).decode()
