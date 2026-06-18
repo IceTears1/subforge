@@ -123,14 +123,25 @@ check_existing_install() {
         # Load existing config
         source "$INSTALL_DIR/.env" 2>/dev/null || true
 
-        echo -e "  端口:         ${CYAN}${PORT:-8080}${NC}"
-        echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME:-admin}${NC}"
-        echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD:-****}${NC}"
+        # Set defaults from existing config
+        FRONTEND_PORT="${FRONTEND_PORT:-8080}"
+        BACKEND_PORT="${BACKEND_PORT:-8081}"
+        ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+        ADMIN_PASSWORD="${ADMIN_PASSWORD:-****}"
+        DOMAIN="${DOMAIN:-}"
+        EMAIL="${EMAIL:-}"
+        ALI_AK="${ALI_AK:-}"
+        ALI_SK="${ALI_SK:-}"
+
+        echo -e "  前端端口:     ${CYAN}${FRONTEND_PORT}${NC}"
+        echo -e "  后端端口:     ${CYAN}${BACKEND_PORT}${NC}"
+        echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
+        echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
         [ -n "${DB_PASSWORD:-}" ] && echo -e "  数据库密码:   ${CYAN}${DB_PASSWORD}${NC}"
-        [ -n "${DOMAIN:-}" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
-        [ -n "${EMAIL:-}" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
-        [ -n "${ALI_AK:-}" ] && echo -e "  阿里云 AK:    ${CYAN}${ALI_AK:0:8}****${NC}"
-        [ -n "${ALI_SK:-}" ] && echo -e "  阿里云 SK:    ${CYAN}${ALI_SK:0:4}****${NC}"
+        [ -n "$DOMAIN" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
+        [ -n "$EMAIL" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
+        [ -n "$ALI_AK" ] && echo -e "  阿里云 AK:    ${CYAN}${ALI_AK:0:8}****${NC}"
+        [ -n "$ALI_SK" ] && echo -e "  阿里云 SK:    ${CYAN}${ALI_SK:0:4}****${NC}"
         echo ""
 
         echo -e "${YELLOW}是否使用已有配置和数据? [Y/n]${NC}"
@@ -172,6 +183,19 @@ interactive_config() {
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
 
+    # Load existing config if available
+    if [ -f "$INSTALL_DIR/.env" ]; then
+        source "$INSTALL_DIR/.env" 2>/dev/null || true
+        FRONTEND_PORT="${FRONTEND_PORT:-8080}"
+        BACKEND_PORT="${BACKEND_PORT:-8081}"
+        ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+        ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+        DOMAIN="${DOMAIN:-}"
+        EMAIL="${EMAIL:-}"
+        ALI_AK="${ALI_AK:-}"
+        ALI_SK="${ALI_SK:-}"
+    fi
+
     if [ "$USE_EXISTING_DATA" = true ]; then
         log "使用已有配置"
     else
@@ -200,15 +224,14 @@ interactive_config() {
     echo ""
     echo -e "${DIM}--- 域名/SSL 配置 留空跳过 ---${NC}"
 
-    # Check if domain already configured
-    EXISTING_DOMAIN=$(grep -oP 'DOMAIN=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
-    if [ -n "$EXISTING_DOMAIN" ]; then
-        echo -e "${YELLOW}域名 [${EXISTING_DOMAIN}]${NC}"
+    # Domain
+    if [ -n "$DOMAIN" ]; then
+        echo -e "${YELLOW}域名 [${DOMAIN}]${NC}"
     else
         echo -e "${YELLOW}域名 例: example.com${NC}"
     fi
     read -p "> " input
-    DOMAIN="${input:-$EXISTING_DOMAIN}"
+    DOMAIN="${input:-$DOMAIN}"
 
     if [ -n "$DOMAIN" ]; then
         # SSL provider selection
@@ -222,21 +245,30 @@ interactive_config() {
 
         if [ "$SSL_PROVIDER" = "2" ]; then
             # Alibaba Cloud SSL
-            echo ""
-            echo -e "${YELLOW}阿里云 AccessKey ID${NC}"
-            read -p "> " ALI_AK
-            echo -e "${YELLOW}阿里云 AccessKey Secret${NC}"
-            read -p "> " ALI_SK
+            if [ -n "$ALI_AK" ]; then
+                echo -e "${YELLOW}阿里云 AccessKey ID [${ALI_AK:0:8}****]${NC}"
+            else
+                echo -e "${YELLOW}阿里云 AccessKey ID${NC}"
+            fi
+            read -p "> " input
+            ALI_AK="${input:-$ALI_AK}"
+
+            if [ -n "$ALI_SK" ]; then
+                echo -e "${YELLOW}阿里云 AccessKey Secret [${ALI_SK:0:4}****]${NC}"
+            else
+                echo -e "${YELLOW}阿里云 AccessKey Secret${NC}"
+            fi
+            read -p "> " input
+            ALI_SK="${input:-$ALI_SK}"
         else
             # Let's Encrypt
-            EXISTING_EMAIL=$(grep -oP 'EMAIL=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
-            if [ -n "$EXISTING_EMAIL" ]; then
-                echo -e "${YELLOW}邮箱 [${EXISTING_EMAIL}]${NC}"
+            if [ -n "$EMAIL" ]; then
+                echo -e "${YELLOW}邮箱 [${EMAIL}]${NC}"
             else
                 echo -e "${YELLOW}邮箱 用于SSL证书${NC}"
             fi
             read -p "> " input
-            EMAIL="${input:-$EXISTING_EMAIL}"
+            EMAIL="${input:-$EMAIL}"
         fi
     fi
 
