@@ -1,5 +1,5 @@
 #!/bin/bash
-# SubForge One-Click Installer (Japan ECS Compatible)
+# SubForge One-Click Installer v1.0.1
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 
 set -euo pipefail
@@ -14,10 +14,15 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
+VERSION="1.0.1"
+
+# Default values
 PORT=8080
+ADMIN_USERNAME="admin"
 ADMIN_PASSWORD=""
-DB_PASSWORD=""
-JWT_SECRET=""
+DOMAIN=""
+EMAIL=""
+USE_EXISTING_DATA=false
 
 log()   { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -41,16 +46,7 @@ detect_os() {
     else
         OS_ID="unknown"
     fi
-
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64|amd64)  GOARCH="amd64" ;;
-        aarch64|arm64) GOARCH="arm64" ;;
-        armv7l)        GOARCH="arm" ;;
-        *)             GOARCH="amd64" ;;
-    esac
-
-    info "系统: $OS_ID ($ARCH)"
+    info "系统: $OS_ID ($(uname -m))"
 }
 
 install_docker() {
@@ -60,15 +56,7 @@ install_docker() {
         return
     fi
     warn "安装 Docker..."
-
-    # 使用国内镜像安装 Docker
-    if [ "$OS_ID" = "centos" ] || [ "$OS_ID" = "rhel" ]; then
-        yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
-        yum install -y docker-ce docker-ce-cli containerd.io
-    else
-        curl -fsSL https://get.docker.com | bash 2>/dev/null || error "Docker 安装失败"
-    fi
-
+    curl -fsSL https://get.docker.com | bash 2>/dev/null || error "Docker 安装失败"
     systemctl enable docker 2>/dev/null || true
     systemctl start docker 2>/dev/null || true
     log "Docker 安装完成"
@@ -82,6 +70,12 @@ install_compose() {
     fi
     warn "安装 Docker Compose..."
     mkdir -p /usr/local/lib/docker/cli-plugins
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64)  GOARCH="amd64" ;;
+        aarch64|arm64) GOARCH="arm64" ;;
+        *)             GOARCH="amd64" ;;
+    esac
     curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${GOARCH}" \
         -o /usr/local/lib/docker/cli-plugins/docker-compose
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
@@ -94,10 +88,10 @@ clone_repo() {
 
     if [ -d "$INSTALL_DIR/.git" ]; then
         cd "$INSTALL_DIR"
-        OLD=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        OLD=$(cat VERSION 2>/dev/null || echo "unknown")
         git fetch origin main 2>/dev/null
         git reset --hard origin/main 2>/dev/null
-        NEW=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        NEW=$(cat VERSION 2>/dev/null || echo "unknown")
         if [ "$OLD" != "$NEW" ]; then
             IS_UPGRADE=true
             log "检测到新版本: $OLD → $NEW"
@@ -112,8 +106,37 @@ clone_repo() {
     fi
 }
 
+check_existing_install() {
+    if [ -f "$INSTALL_DIR/.env" ]; then
+        echo ""
+        echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+        echo -e "${YELLOW}${BOLD}  📋 检测到已有安装${NC}"
+        echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
+
+        # Load existing config
+        source "$INSTALL_DIR/.env" 2>/dev/null || true
+
+        echo -e "  端口:         ${CYAN}${PORT:-8080}${NC}"
+        echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME:-admin}${NC}"
+        echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD:-****}${NC}"
+        [ -n "${DB_PASSWORD:-}" ] && echo -e "  数据库密码:   ${CYAN}${DB_PASSWORD}${NC}"
+        echo ""
+
+        read -p "$(echo -e ${YELLOW}是否使用已有配置和数据? [Y/n]: ${NC})" use_existing
+        if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
+            USE_EXISTING_DATA=true
+            log "将使用已有配置和数据"
+            return
+        fi
+
+        read -p "$(echo -e ${YELLOW}是否备份数据库? [Y/n]: ${NC})" backup_db
+        if [[ ! "$backup_db" =~ ^[Nn]$ ]]; then
+            backup_database
+        fi
+    fi
+}
+
 backup_database() {
-    # Backup database if it exists and is running
     if docker ps | grep -q subforge-db; then
         info "备份数据库..."
         BACKUP_DIR="$INSTALL_DIR/backups"
@@ -124,15 +147,66 @@ backup_database() {
             BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
             log "数据库已备份: $BACKUP_FILE ($BACKUP_SIZE)"
         else
-            warn "数据库备份失败，继续安装..."
+            warn "数据库备份失败"
         fi
+    fi
+}
+
+interactive_config() {
+    echo ""
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  ⚙️  配置安装参数${NC}"
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo ""
+
+    if [ "$USE_EXISTING_DATA" = true ]; then
+        log "使用已有配置"
+        return
+    fi
+
+    # Port
+    read -p "$(echo -e ${YELLOW}访问端口 [${PORT}]: ${NC})" input
+    PORT="${input:-$PORT}"
+
+    # Admin username
+    read -p "$(echo -e ${YELLOW}管理员账户 [${ADMIN_USERNAME}]: ${NC})" input
+    ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
+
+    # Admin password
+    read -p "$(echo -e ${YELLOW}管理员密码 [随机生成]: ${NC})" input
+    ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
+
+    # Domain (optional)
+    echo ""
+    echo -e "${DIM}--- 可选: 域名/SSL 配置 (留空跳过) ---${NC}"
+    read -p "$(echo -e ${YELLOW}域名 (例: example.com): ${NC})" input
+    DOMAIN="${input:-}"
+    if [ -n "$DOMAIN" ]; then
+        read -p "$(echo -e ${YELLOW}邮箱 (用于SSL证书): ${NC})" input
+        EMAIL="${input:-}"
+    fi
+
+    # Confirm
+    echo ""
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  📋 配置确认${NC}"
+    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "  端口:         ${CYAN}${PORT}${NC}"
+    echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
+    echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
+    [ -n "$DOMAIN" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
+    [ -n "$EMAIL" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
+    echo ""
+
+    read -p "$(echo -e ${YELLOW}确认开始安装? [Y/n]: ${NC})" confirm
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        error "安装已取消"
     fi
 }
 
 load_images() {
     info "加载预构建镜像..."
 
-    # Load backend image
     if [ -f "$INSTALL_DIR/images/subforge-backend.tar.gz" ]; then
         docker load < "$INSTALL_DIR/images/subforge-backend.tar.gz"
         log "后端镜像已加载"
@@ -140,7 +214,6 @@ load_images() {
         warn "后端镜像不存在，将使用本地构建"
     fi
 
-    # Load frontend image
     if [ -f "$INSTALL_DIR/images/subforge-frontend.tar.gz" ]; then
         docker load < "$INSTALL_DIR/images/subforge-frontend.tar.gz"
         log "前端镜像已加载"
@@ -153,31 +226,30 @@ generate_config() {
     info "生成配置..."
     cd "$INSTALL_DIR"
 
-    [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(gen_pass 24)
-    [ -z "$JWT_SECRET" ] && JWT_SECRET=$(gen_pass 32)
-    [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
-    [ -z "$ADMIN_USERNAME" ] && ADMIN_USERNAME="admin"
+    if [ "$USE_EXISTING_DATA" = true ]; then
+        # Use existing config
+        source .env 2>/dev/null || true
+    else
+        # Generate new config
+        [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(gen_pass 24)
+        [ -z "$JWT_SECRET" ] && JWT_SECRET=$(gen_pass 32)
+        [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
 
-    cat > .env <<EOF
+        cat > .env <<EOF
 PORT=${PORT}
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
-DB_SSL_MODE=disable
 JWT_SECRET=${JWT_SECRET}
-JWT_EXPIRY=24h
 ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
-CORS_ORIGINS=
-ADMIN_IP_WHITELIST=
-GIN_MODE=release
 EOF
+    fi
 
     log "配置已生成"
 }
 
 build_frontend() {
-    # Skip if prebuilt frontend image is loaded
     if docker image inspect subforge-frontend:latest >/dev/null 2>&1; then
         log "使用预构建前端镜像，跳过编译"
         return
@@ -185,33 +257,15 @@ build_frontend() {
 
     info "编译前端..."
     cd "$INSTALL_DIR/frontend"
-
-    # 使用国内 npm 镜像
     docker run --rm \
         -v "$(pwd):/app" \
         -w /app \
         node:20-alpine \
         sh -c "npm config set registry https://registry.npmmirror.com && npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps && npm run build"
-
     log "前端编译完成"
 }
 
-start_services() {
-    info "启动服务..."
-    cd "$INSTALL_DIR" || error "无法进入安装目录: $INSTALL_DIR"
-
-    if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ]; then
-        error "找不到 docker-compose.yml 文件"
-    fi
-
-    docker compose down --remove-orphans 2>/dev/null || true
-    docker compose up -d
-
-    log "服务已启动"
-}
-
 setup_ssl() {
-    # Skip if no domain provided
     if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
         return
     fi
@@ -219,42 +273,30 @@ setup_ssl() {
     echo ""
     info "配置域名和 SSL..."
 
-    # Step 1: Install certbot
-    info "检查 certbot..."
+    # Install certbot
     if ! command -v certbot &>/dev/null; then
         warn "安装 certbot..."
         if command -v apt-get &>/dev/null; then
             apt-get update -qq
             apt-get install -y -qq certbot python3-certbot-nginx
-        elif command -v dnf &>/dev/null; then
-            dnf install -y -q certbot python3-certbot-nginx
         elif command -v yum &>/dev/null; then
             yum install -y -q epel-release 2>/dev/null || true
             yum install -y -q certbot python3-certbot-nginx
-        elif command -v apk &>/dev/null; then
-            apk add --no-cache certbot certbot-nginx
         else
             warn "无法自动安装 certbot，请手动安装后运行: setup-ssl.sh"
             return
         fi
-        log "certbot 已安装"
     fi
 
-    # Step 2: Update nginx config
-    info "更新 nginx 配置..."
+    # Update nginx config
     cd "$INSTALL_DIR"
-
     if [ -f nginx/nginx-ssl.conf ]; then
         cp nginx/nginx-ssl.conf nginx/nginx.conf
         sed -i "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf 2>/dev/null || \
             sed -i '' "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf
-        log "nginx 配置已更新"
-    else
-        warn "nginx-ssl.conf 不存在，跳过 SSL 配置"
-        return
     fi
 
-    # Step 3: Get SSL certificate
+    # Get SSL certificate
     info "申请 SSL 证书..."
     docker compose stop nginx 2>/dev/null || true
     sleep 2
@@ -263,15 +305,12 @@ setup_ssl() {
         -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive; then
         log "SSL 证书申请成功"
     else
-        warn "SSL 证书申请失败，请确保域名 ${DOMAIN} 已解析到本机 IP"
+        warn "SSL 证书申请失败，请确保域名已解析到本机 IP"
         docker compose start nginx 2>/dev/null || true
         return
     fi
 
-    docker compose start nginx 2>/dev/null || true
-
-    # Step 4: Setup auto-renewal
-    info "配置自动续期..."
+    # Setup auto-renewal
     HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
     mkdir -p "$HOOK_DIR"
     cat > "$HOOK_DIR/restart-nginx.sh" <<'EOF'
@@ -285,12 +324,18 @@ EOF
         (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
     fi
 
-    # Step 5: Restart nginx with SSL
-    info "重启 nginx..."
-    cd "$INSTALL_DIR"
-    docker compose restart nginx
-
+    docker compose start nginx 2>/dev/null || true
     log "SSL 配置完成"
+}
+
+start_services() {
+    info "启动服务..."
+    cd "$INSTALL_DIR" || error "无法进入安装目录"
+
+    docker compose down --remove-orphans 2>/dev/null || true
+    docker compose up -d
+
+    log "服务已启动"
 }
 
 wait_health() {
@@ -323,89 +368,6 @@ get_public_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
 }
 
-load_old_config() {
-    # Check if old config exists
-    if [ -f "$INSTALL_DIR/.env" ]; then
-        log "检测到旧的配置文件"
-        source "$INSTALL_DIR/.env" 2>/dev/null || true
-
-        OLD_PORT="${PORT:-}"
-        OLD_ADMIN_USERNAME="${ADMIN_USERNAME:-}"
-        OLD_ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
-        OLD_DB_PASSWORD="${DB_PASSWORD:-}"
-
-        if [ -n "$OLD_PORT" ] || [ -n "$OLD_ADMIN_USERNAME" ] || [ -n "$OLD_ADMIN_PASSWORD" ]; then
-            echo ""
-            echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
-            echo -e "${YELLOW}${BOLD}  📋 检测到旧配置${NC}"
-            echo -e "${YELLOW}${BOLD}═══════════════════════════════════════${NC}"
-            [ -n "$OLD_PORT" ] && echo -e "  端口:         ${CYAN}${OLD_PORT}${NC}"
-            [ -n "$OLD_ADMIN_USERNAME" ] && echo -e "  管理员账户:   ${CYAN}${OLD_ADMIN_USERNAME}${NC}"
-            [ -n "$OLD_ADMIN_PASSWORD" ] && echo -e "  管理员密码:   ${CYAN}${OLD_ADMIN_PASSWORD}${NC}"
-            [ -n "$OLD_DB_PASSWORD" ] && echo -e "  数据库密码:   ${CYAN}${OLD_DB_PASSWORD}${NC}"
-            echo ""
-
-            read -p "$(echo -e ${YELLOW}是否使用旧配置? [Y/n]: ${NC})" use_old
-            if [[ ! "$use_old" =~ ^[Nn]$ ]]; then
-                log "使用旧配置"
-                USE_OLD_CONFIG=true
-                return
-            fi
-        fi
-    fi
-    USE_OLD_CONFIG=false
-}
-
-interactive_config() {
-    echo ""
-    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
-    echo -e "${CYAN}${BOLD}  ⚙️  配置安装参数${NC}"
-    echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
-    echo ""
-
-    # Load old config if exists
-    load_old_config
-
-    if [ "$USE_OLD_CONFIG" = true ]; then
-        log "已采用旧配置，跳过配置输入"
-        return
-    fi
-
-    # Port
-    read -p "$(echo -e ${YELLOW}访问端口 [${PORT}]: ${NC})" input_port
-    PORT="${input_port:-$PORT}"
-
-    # Admin username
-    read -p "$(echo -e ${YELLOW}管理员账户 [admin]: ${NC})" input_username
-    ADMIN_USERNAME="${input_username:-admin}"
-
-    # Admin password
-    read -p "$(echo -e ${YELLOW}管理员密码 [随机生成]: ${NC})" input_password
-    ADMIN_PASSWORD="${input_password:-$(gen_pass 16)}"
-
-    # Domain (optional)
-    echo ""
-    echo -e "${DIM}--- 可选: 域名/SSL 配置 (留空跳过) ---${NC}"
-    read -p "$(echo -e ${YELLOW}域名 (例: example.com): ${NC})" DOMAIN
-    if [ -n "$DOMAIN" ]; then
-        read -p "$(echo -e ${YELLOW}邮箱 (用于SSL证书): ${NC})" EMAIL
-    fi
-
-    echo ""
-    log "配置确认:"
-    echo -e "  端口:         ${CYAN}${PORT}${NC}"
-    echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
-    echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
-    [ -n "$DOMAIN" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
-    [ -n "$EMAIL" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
-    echo ""
-
-    read -p "$(echo -e ${YELLOW}确认开始安装? [Y/n]: ${NC})" confirm
-    if [[ "$confirm" =~ ^[Nn]$ ]]; then
-        error "安装已取消"
-    fi
-}
-
 main() {
     echo ""
     echo -e "${CYAN}${BOLD}"
@@ -415,12 +377,14 @@ main() {
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本 (日本 ECS 兼容版)${NC}"
-    echo -e "  ${DIM}版本 1.0.1${NC}"
+    echo -e "  ${BOLD}一键安装脚本 v${VERSION}${NC}"
     echo ""
 
     check_root
     detect_os
+
+    # Check for existing installation
+    check_existing_install
 
     # Interactive configuration
     interactive_config
@@ -431,16 +395,8 @@ main() {
 
     # Setup project
     clone_repo
-
-    # Backup database if upgrading
-    if [ "$IS_UPGRADE" = true ]; then
-        backup_database
-    fi
-
     load_images
     generate_config
-
-    # Build frontend (only if no prebuilt image)
     build_frontend
 
     # Start services
@@ -454,26 +410,29 @@ main() {
 
     echo ""
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
-    if [ "$IS_UPGRADE" = true ]; then
-        echo -e "${GREEN}${BOLD}  ✅ 升级成功!${NC}"
-    else
-        echo -e "${GREEN}${BOLD}  ✅ 安装成功!${NC}"
-    fi
+    echo -e "${GREEN}${BOLD}  ✅ 安装完成!${NC}"
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
+    echo -e "  ${BOLD}访问地址:${NC}"
     if [ -n "$DOMAIN" ]; then
-        echo -e "  URL:      ${CYAN}https://${DOMAIN}${NC}"
+        echo -e "    ${CYAN}https://${DOMAIN}${NC}"
     else
-        echo -e "  URL:      ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
-    fi
-    echo -e "  用户名:   ${CYAN}${ADMIN_USERNAME}${NC}"
-    echo -e "  密码:     ${CYAN}${ADMIN_PASSWORD}${NC}"
-    if [ "$IS_UPGRADE" = true ]; then
-        echo -e "  ${DIM}数据库已自动备份到: ${INSTALL_DIR}/backups/${NC}"
+        echo -e "    ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
     fi
     echo ""
-    echo -e "  ${DIM}查看日志: cd ${INSTALL_DIR} && docker compose logs -f${NC}"
-    echo -e "  ${DIM}重启服务: cd ${INSTALL_DIR} && docker compose restart${NC}"
+    echo -e "  ${BOLD}登录信息:${NC}"
+    echo -e "    用户名: ${CYAN}${ADMIN_USERNAME}${NC}"
+    echo -e "    密  码: ${CYAN}${ADMIN_PASSWORD}${NC}"
+    echo ""
+    echo -e "  ${BOLD}常用命令:${NC}"
+    echo -e "    ${DIM}查看日志:   cd ${INSTALL_DIR} && docker compose logs -f${NC}"
+    echo -e "    ${DIM}重启服务:   cd ${INSTALL_DIR} && docker compose restart${NC}"
+    echo -e "    ${DIM}停止服务:   cd ${INSTALL_DIR} && docker compose down${NC}"
+    echo -e "    ${DIM}查看状态:   cd ${INSTALL_DIR} && docker compose ps${NC}"
+    if [ -n "$DOMAIN" ]; then
+        echo -e "    ${DIM}SSL 续期:   certbot renew${NC}"
+        echo -e "    ${DIM}SSL 状态:   certbot certificates${NC}"
+    fi
     echo ""
 }
 
