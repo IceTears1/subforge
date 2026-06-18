@@ -18,7 +18,7 @@ def get_utc_time():
     return datetime.utcnow()
 from typing import Optional, List
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Body
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON
@@ -176,6 +176,9 @@ class ConvertRequest(BaseModel):
     source: Optional[str] = None
     target: str = "clash"
     rename: bool = True
+
+class NodeImportRequest(BaseModel):
+    uris: str
 
 # ─── Seed admin ───────────────────────────────────────────────────────────────
 def seed_admin():
@@ -942,7 +945,7 @@ def get_all_nodes(current_user: User = Depends(get_current_user), db: Session = 
     ]
 
 @app.post("/api/nodes/import")
-def import_nodes(uris: str = Body(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Import individual node URIs (vmess://, vless://, trojan://, ss://, hysteria2://)"""
     # Find or create "手动导入" subscription
     sub = db.query(Subscription).filter(
@@ -963,7 +966,7 @@ def import_nodes(uris: str = Body(...), current_user: User = Depends(get_current
         db.refresh(sub)
 
     # Parse each line
-    lines = [line.strip() for line in uris.strip().split('\n') if line.strip()]
+    lines = [line.strip() for line in req.uris.strip().split('\n') if line.strip()]
     imported = 0
 
     for line in lines:
