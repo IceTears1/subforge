@@ -20,7 +20,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.1.3"
+VERSION="1.2.0"
 
 # Default ports (configurable via interactive prompts)
 FRONTEND_PORT=3001
@@ -899,6 +899,13 @@ main() {
     echo -e "    用户名: ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "    密  码: ${CYAN}${ADMIN_PASSWORD}${NC}"
     echo ""
+    echo -e "  ${BOLD}订阅格式:${NC}"
+    if [ -n "$DOMAIN" ]; then
+        echo -e "    ${CYAN}https://${DOMAIN}:${SSL_PORT}/sub/{token}/export?target=base64${NC}"
+    fi
+    echo -e "    ${CYAN}http://${PUBLIC_IP}:${FRONTEND_PORT}/sub/{token}/export?target=base64${NC}"
+    echo -e "    ${DIM}登录后在订阅列表中获取 token${NC}"
+    echo ""
     echo -e "  ${BOLD}快捷管理:${NC}"
     echo -e "    ${CYAN}subforge${NC}  ${DIM}# 输入此命令打开交互式管理菜单${NC}"
     echo ""
@@ -906,7 +913,7 @@ main() {
     echo -e "    ${DIM}cd ${INSTALL_DIR} && docker compose logs -f${NC}"
     echo -e "    ${DIM}cd ${INSTALL_DIR} && docker compose restart${NC}"
     if [ -n "$DOMAIN" ]; then
-        echo -e "    ${DIM}certbot renew  # SSL 续期${NC}"
+        echo -e "    ${DIM}cd ${INSTALL_DIR} && docker compose --profile proxy up -d  # 启动域名代理${NC}"
     fi
     echo ""
 }
