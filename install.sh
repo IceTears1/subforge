@@ -471,6 +471,30 @@ setup_letsencrypt_ssl() {
         -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive; then
         log "SSL 证书申请成功"
 
+        # Create certificate directory for nginx
+        CERT_DIR="$INSTALL_DIR/ssl/${DOMAIN}"
+        mkdir -p "$CERT_DIR"
+
+        # Copy certificates from Let's Encrypt
+        cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "$CERT_DIR/${DOMAIN}.pem"
+        cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "$CERT_DIR/${DOMAIN}.key"
+
+        # Create symlink for nginx to mount
+        mkdir -p "$INSTALL_DIR/certs"
+        ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
+
+        # Add DOMAIN to .env
+        if ! grep -q "^DOMAIN=" "$INSTALL_DIR/.env"; then
+            echo "DOMAIN=${DOMAIN}" >> "$INSTALL_DIR/.env"
+        else
+            sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" "$INSTALL_DIR/.env"
+        fi
+
+        # Restart nginx to apply SSL config
+        cd "$INSTALL_DIR"
+        docker compose down nginx 2>/dev/null || true
+        docker compose up -d nginx
+
         # Setup auto-renewal
         HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
         mkdir -p "$HOOK_DIR"
@@ -484,6 +508,8 @@ EOF
         if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
             (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
         fi
+
+        log "SSL 配置完成!"
     else
         warn "SSL 证书申请失败，请确保域名已解析到本机 IP"
     fi
@@ -527,65 +553,26 @@ setup_aliyun_ssl() {
         info "安装证书..."
         $ACME_SH --install-cert -d "$DOMAIN" \
             --key-file "$CERT_DIR/${DOMAIN}.key" \
-            --fullchain-file "$CERT_DIR/${DOMAIN}.pem" \
-            --reloadcmd "cd $INSTALL_DIR && docker compose restart nginx" 2>&1
+            --fullchain-file "$CERT_DIR/${DOMAIN}.pem" 2>&1
 
         if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
             log "证书已安装到: $CERT_DIR"
 
-            # Update nginx config with SSL
-            cat > "$INSTALL_DIR/nginx/nginx.conf" <<EOF
-server {
-    listen 80;
-    server_name ${DOMAIN};
-    return 301 https://\$host\$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name ${DOMAIN};
-
-    ssl_certificate /etc/nginx/certs/${DOMAIN}.pem;
-    ssl_certificate_key /etc/nginx/certs/${DOMAIN}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    # Security headers
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
-
-    # API reverse proxy
-    location /api/ {
-        proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 300s;
-    }
-
-    # Client subscription endpoint
-    location /sub/ {
-        proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
-
-    # Frontend
-    location / {
-        root /usr/share/nginx/html;
-        try_files \$uri \$uri/ /index.html;
-    }
-}
-EOF
-
-            # Mount certs directory
+            # Create symlink for nginx to mount
             mkdir -p "$INSTALL_DIR/certs"
             ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
 
-            # Restart nginx
+            # Add DOMAIN to .env
+            if ! grep -q "^DOMAIN=" "$INSTALL_DIR/.env"; then
+                echo "DOMAIN=${DOMAIN}" >> "$INSTALL_DIR/.env"
+            else
+                sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" "$INSTALL_DIR/.env"
+            fi
+
+            # Restart nginx to apply SSL config
             cd "$INSTALL_DIR"
-            docker compose restart nginx
+            docker compose down nginx 2>/dev/null || true
+            docker compose up -d nginx
 
             log "SSL 配置完成!"
         else
