@@ -169,34 +169,47 @@ interactive_config() {
 
     if [ "$USE_EXISTING_DATA" = true ]; then
         log "使用已有配置"
-        return
+    else
+        # Port
+        echo -e "${YELLOW}访问端口 [${PORT}]${NC}"
+        read -p "> " input
+        PORT="${input:-$PORT}"
+
+        # Admin username
+        echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
+        read -p "> " input
+        ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
+
+        # Admin password
+        echo -e "${YELLOW}管理员密码 随机生成${NC}"
+        read -p "> " input
+        ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
     fi
 
-    # Port
-    echo -e "${YELLOW}访问端口 [${PORT}]${NC}"
-    read -p "> " input
-    PORT="${input:-$PORT}"
-
-    # Admin username
-    echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
-    read -p "> " input
-    ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
-
-    # Admin password
-    echo -e "${YELLOW}管理员密码 随机生成${NC}"
-    read -p "> " input
-    ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
-
-    # Domain (optional)
+    # Domain configuration (always ask)
     echo ""
-    echo -e "${DIM}--- 可选: 域名/SSL 配置 留空跳过 ---${NC}"
-    echo -e "${YELLOW}域名 例: example.com${NC}"
+    echo -e "${DIM}--- 域名/SSL 配置 留空跳过 ---${NC}"
+
+    # Check if domain already configured
+    EXISTING_DOMAIN=$(grep -oP 'DOMAIN=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
+    if [ -n "$EXISTING_DOMAIN" ]; then
+        echo -e "${YELLOW}域名 [${EXISTING_DOMAIN}]${NC}"
+    else
+        echo -e "${YELLOW}域名 例: example.com${NC}"
+    fi
     read -p "> " input
-    DOMAIN="${input:-}"
+    DOMAIN="${input:-$EXISTING_DOMAIN}"
+
     if [ -n "$DOMAIN" ]; then
-        echo -e "${YELLOW}邮箱 用于SSL证书${NC}"
+        # Check if email already configured
+        EXISTING_EMAIL=$(grep -oP 'EMAIL=\K.*' "$INSTALL_DIR/.env" 2>/dev/null || echo "")
+        if [ -n "$EXISTING_EMAIL" ]; then
+            echo -e "${YELLOW}邮箱 [${EXISTING_EMAIL}]${NC}"
+        else
+            echo -e "${YELLOW}邮箱 用于SSL证书${NC}"
+        fi
         read -p "> " input
-        EMAIL="${input:-}"
+        EMAIL="${input:-$EXISTING_EMAIL}"
     fi
 
     # Confirm
