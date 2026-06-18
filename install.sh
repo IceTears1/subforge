@@ -90,18 +90,42 @@ install_compose() {
 
 clone_repo() {
     info "下载代码..."
+    IS_UPGRADE=false
+
     if [ -d "$INSTALL_DIR/.git" ]; then
         cd "$INSTALL_DIR"
         OLD=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
         git fetch origin main 2>/dev/null
         git reset --hard origin/main 2>/dev/null
         NEW=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        log "代码已更新: $OLD → $NEW"
+        if [ "$OLD" != "$NEW" ]; then
+            IS_UPGRADE=true
+            log "检测到新版本: $OLD → $NEW"
+        else
+            log "已是最新版本"
+        fi
     else
         rm -rf "$INSTALL_DIR"
         git clone "$REPO" "$INSTALL_DIR"
         cd "$INSTALL_DIR"
         log "代码已克隆"
+    fi
+}
+
+backup_database() {
+    # Backup database if it exists and is running
+    if docker ps | grep -q subforge-db; then
+        info "备份数据库..."
+        BACKUP_DIR="$INSTALL_DIR/backups"
+        mkdir -p "$BACKUP_DIR"
+        BACKUP_FILE="$BACKUP_DIR/subforge-$(date +%Y%m%d_%H%M%S).sql"
+
+        if docker exec subforge-db pg_dump -U subforge subforge > "$BACKUP_FILE" 2>/dev/null; then
+            BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+            log "数据库已备份: $BACKUP_FILE ($BACKUP_SIZE)"
+        else
+            warn "数据库备份失败，继续安装..."
+        fi
     fi
 }
 
@@ -314,10 +338,16 @@ main() {
 
     # Setup project
     clone_repo
+
+    # Backup database if upgrading
+    if [ "$IS_UPGRADE" = true ]; then
+        backup_database
+    fi
+
     load_images
     generate_config
 
-    # Build frontend
+    # Build frontend (only if no prebuilt image)
     build_frontend
 
     # Start services
@@ -328,12 +358,19 @@ main() {
 
     echo ""
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
-    echo -e "${GREEN}${BOLD}  ✅ 安装成功!${NC}"
+    if [ "$IS_UPGRADE" = true ]; then
+        echo -e "${GREEN}${BOLD}  ✅ 升级成功!${NC}"
+    else
+        echo -e "${GREEN}${BOLD}  ✅ 安装成功!${NC}"
+    fi
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
     echo -e "  URL:      ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
-    echo -e "  用户名:   ${CYAN}admin${NC}"
+    echo -e "  用户名:   ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  密码:     ${CYAN}${ADMIN_PASSWORD}${NC}"
+    if [ "$IS_UPGRADE" = true ]; then
+        echo -e "  ${DIM}数据库已自动备份到: ${INSTALL_DIR}/backups/${NC}"
+    fi
     echo ""
     echo -e "  ${DIM}查看日志: cd ${INSTALL_DIR} && docker compose logs -f${NC}"
     echo -e "  ${DIM}重启服务: cd ${INSTALL_DIR} && docker compose restart${NC}"

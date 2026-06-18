@@ -110,6 +110,35 @@ class AuditLog(Base):
 # ─── Create tables ────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
+# ─── Auto Migration ───────────────────────────────────────────────────────────
+def migrate_database():
+    """Auto-migrate database schema - add missing columns"""
+    try:
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(engine)
+
+        # Check nodes table
+        if 'nodes' in inspector.get_table_names():
+            columns = [col['name'] for col in inspector.get_columns('nodes')]
+
+            with engine.connect() as conn:
+                if 'download_speed' not in columns:
+                    conn.execute(text("ALTER TABLE nodes ADD COLUMN download_speed DOUBLE PRECISION DEFAULT 0"))
+                    conn.commit()
+                    print("Migration: Added nodes.download_speed column")
+
+                if 'download_speed_type' not in columns:
+                    conn.execute(text("ALTER TABLE nodes ADD COLUMN download_speed_type VARCHAR(20) DEFAULT ''"))
+                    conn.commit()
+                    print("Migration: Added nodes.download_speed_type column")
+
+        print("Database migration completed")
+    except Exception as e:
+        print(f"Migration warning: {e}")
+
+migrate_database()
+
 # ─── Security ─────────────────────────────────────────────────────────────────
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
