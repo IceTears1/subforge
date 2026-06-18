@@ -20,7 +20,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.0.1"
+VERSION="1.0.2"
 
 # Default values
 FRONTEND_PORT=8080
