@@ -891,10 +891,9 @@ main() {
     echo ""
     echo -e "  ${BOLD}访问地址:${NC}"
     if [ -n "$DOMAIN" ]; then
-        echo -e "    ${CYAN}https://${DOMAIN}${NC}"
-    else
-        echo -e "    ${CYAN}http://${PUBLIC_IP}:${FRONTEND_PORT}${NC}"
+        echo -e "    ${CYAN}https://${DOMAIN}:${SSL_PORT}${NC}"
     fi
+    echo -e "    ${CYAN}http://${PUBLIC_IP}:${FRONTEND_PORT}${NC}"
     echo ""
     echo -e "  ${BOLD}登录信息:${NC}"
     echo -e "    用户名: ${CYAN}${ADMIN_USERNAME}${NC}"
