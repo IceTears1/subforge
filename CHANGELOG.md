@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.5 (2026-06-18)
+
+### Bug Fixes
+- **修复入口脚本循环调用** — 解决 docker-entrypoint.sh 无限递归问题
+- **envsubst 端口替换** — 后端端口动态配置正常工作
+
 ## v1.0.4 (2026-06-18)
 
 ### Bug Fixes
