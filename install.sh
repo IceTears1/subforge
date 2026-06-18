@@ -1,8 +1,14 @@
 #!/bin/bash
 # SubForge One-Click Installer v1.0.1
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
+#    or: sudo bash install.sh
 
 set -euo pipefail
+
+# Support piped execution (curl | bash)
+if [ ! -t 0 ] && [ -e /dev/tty ]; then
+    exec < /dev/tty
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
