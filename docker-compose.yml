@@ -55,6 +55,11 @@ services:
       - "${FRONTEND_PORT:-8080}:80"
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-8081}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       backend:
         condition: service_healthy
