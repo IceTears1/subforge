@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.4 (2026-06-18)
+
+### Bug Fixes
+- **Nginx 健康检查** — 添加 healthcheck 配置，解决容器状态误判问题
+
 ## v1.0.3 (2026-06-18)
 
 ### Bug Fixes
