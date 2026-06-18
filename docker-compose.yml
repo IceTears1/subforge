@@ -45,7 +45,7 @@ services:
     network_mode: host
     environment:
       DB_HOST: localhost
-      DB_PORT: 5432
+      DB_PORT: 45000
       DB_NAME: ${DB_NAME:-subforge}
       DB_USER: ${DB_USER:-subforge}
       DB_PASSWORD: ${DB_PASSWORD:-subforge123}
