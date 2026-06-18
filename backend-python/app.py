@@ -4,6 +4,7 @@ import secrets
 import hashlib
 import re
 import yaml
+import base64
 from datetime import datetime, timedelta, timezone
 
 # 东八区 (UTC+8)
