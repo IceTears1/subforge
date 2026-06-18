@@ -256,11 +256,6 @@ interactive_config() {
     DOMAIN="${input:-$DOMAIN}"
 
     if [ -n "$DOMAIN" ]; then
-        # HTTPS port
-        echo -e "${YELLOW}HTTPS 端口 [${SSL_PORT}]${NC}"
-        read -p "> " input
-        SSL_PORT="${input:-$SSL_PORT}"
-
         # SSL provider selection
         echo ""
         echo -e "${YELLOW}SSL 证书来源:${NC}"
