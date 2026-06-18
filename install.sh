@@ -210,6 +210,89 @@ start_services() {
     log "服务已启动"
 }
 
+setup_ssl() {
+    # Skip if no domain provided
+    if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
+        return
+    fi
+
+    echo ""
+    info "配置域名和 SSL..."
+
+    # Step 1: Install certbot
+    info "检查 certbot..."
+    if ! command -v certbot &>/dev/null; then
+        warn "安装 certbot..."
+        if command -v apt-get &>/dev/null; then
+            apt-get update -qq
+            apt-get install -y -qq certbot python3-certbot-nginx
+        elif command -v dnf &>/dev/null; then
+            dnf install -y -q certbot python3-certbot-nginx
+        elif command -v yum &>/dev/null; then
+            yum install -y -q epel-release 2>/dev/null || true
+            yum install -y -q certbot python3-certbot-nginx
+        elif command -v apk &>/dev/null; then
+            apk add --no-cache certbot certbot-nginx
+        else
+            warn "无法自动安装 certbot，请手动安装后运行: setup-ssl.sh"
+            return
+        fi
+        log "certbot 已安装"
+    fi
+
+    # Step 2: Update nginx config
+    info "更新 nginx 配置..."
+    cd "$INSTALL_DIR"
+
+    if [ -f nginx/nginx-ssl.conf ]; then
+        cp nginx/nginx-ssl.conf nginx/nginx.conf
+        sed -i "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf 2>/dev/null || \
+            sed -i '' "s#your-domain\.com#${DOMAIN}#g" nginx/nginx.conf
+        log "nginx 配置已更新"
+    else
+        warn "nginx-ssl.conf 不存在，跳过 SSL 配置"
+        return
+    fi
+
+    # Step 3: Get SSL certificate
+    info "申请 SSL 证书..."
+    docker compose stop nginx 2>/dev/null || true
+    sleep 2
+
+    if certbot certonly --standalone \
+        -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive; then
+        log "SSL 证书申请成功"
+    else
+        warn "SSL 证书申请失败，请确保域名 ${DOMAIN} 已解析到本机 IP"
+        docker compose start nginx 2>/dev/null || true
+        return
+    fi
+
+    docker compose start nginx 2>/dev/null || true
+
+    # Step 4: Setup auto-renewal
+    info "配置自动续期..."
+    HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
+    mkdir -p "$HOOK_DIR"
+    cat > "$HOOK_DIR/restart-nginx.sh" <<'EOF'
+#!/bin/bash
+cd /opt/subforge && docker compose restart nginx 2>/dev/null || true
+EOF
+    chmod +x "$HOOK_DIR/restart-nginx.sh"
+
+    CRON_LINE="0 3,15 * * * certbot renew --quiet --deploy-hook '/etc/letsencrypt/renewal-hooks/deploy/restart-nginx.sh'"
+    if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+        (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+    fi
+
+    # Step 5: Restart nginx with SSL
+    info "重启 nginx..."
+    cd "$INSTALL_DIR"
+    docker compose restart nginx
+
+    log "SSL 配置完成"
+}
+
 wait_health() {
     info "等待服务就绪..."
 
@@ -300,11 +383,21 @@ interactive_config() {
     read -p "$(echo -e ${YELLOW}管理员密码 [随机生成]: ${NC})" input_password
     ADMIN_PASSWORD="${input_password:-$(gen_pass 16)}"
 
+    # Domain (optional)
+    echo ""
+    echo -e "${DIM}--- 可选: 域名/SSL 配置 (留空跳过) ---${NC}"
+    read -p "$(echo -e ${YELLOW}域名 (例: example.com): ${NC})" DOMAIN
+    if [ -n "$DOMAIN" ]; then
+        read -p "$(echo -e ${YELLOW}邮箱 (用于SSL证书): ${NC})" EMAIL
+    fi
+
     echo ""
     log "配置确认:"
     echo -e "  端口:         ${CYAN}${PORT}${NC}"
     echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
+    [ -n "$DOMAIN" ] && echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
+    [ -n "$EMAIL" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
     echo ""
 
     read -p "$(echo -e ${YELLOW}确认开始安装? [Y/n]: ${NC})" confirm
@@ -354,6 +447,9 @@ main() {
     start_services
     wait_health
 
+    # Setup SSL if domain provided
+    setup_ssl
+
     PUBLIC_IP=$(get_public_ip)
 
     echo ""
@@ -365,7 +461,11 @@ main() {
     fi
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
-    echo -e "  URL:      ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
+    if [ -n "$DOMAIN" ]; then
+        echo -e "  URL:      ${CYAN}https://${DOMAIN}${NC}"
+    else
+        echo -e "  URL:      ${CYAN}http://${PUBLIC_IP}:${PORT}${NC}"
+    fi
     echo -e "  用户名:   ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  密码:     ${CYAN}${ADMIN_PASSWORD}${NC}"
     if [ "$IS_UPGRADE" = true ]; then
