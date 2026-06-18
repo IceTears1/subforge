@@ -9,5 +9,5 @@ if [ -f /etc/nginx/nginx.conf.template ]; then
     echo "Nginx config generated with BACKEND_PORT=${BACKEND_PORT:-8081}"
 fi
 
-# Execute the original nginx entrypoint
-exec /docker-entrypoint.sh "$@"
+# Execute nginx directly (skip original entrypoint to avoid recursion)
+exec "$@"
