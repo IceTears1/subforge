@@ -631,6 +631,115 @@ install_cli() {
     fi
 }
 
+ensure_nginx_config() {
+    info "检查 Nginx 配置..."
+
+    # Create nginx directory if not exists
+    mkdir -p "$INSTALL_DIR/nginx"
+
+    # Create default nginx config if not exists
+    if [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf" ]; then
+        cat > "$INSTALL_DIR/nginx/nginx-python.conf" <<'EOF'
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+    client_max_body_size 10m;
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+
+    # Gzip
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_min_length 1000;
+
+    server {
+        listen 80;
+        server_name _;
+
+        # Security headers
+        add_header X-Frame-Options DENY always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-XSS-Protection "1; mode=block" always;
+
+        # Hide server info
+        server_tokens off;
+
+        # API reverse proxy
+        location /api/ {
+            limit_req zone=api burst=50 nodelay;
+            proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 300s;
+        }
+
+        # Client subscription endpoint
+        location /sub/ {
+            limit_req zone=api burst=20 nodelay;
+            proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        # Frontend (static files)
+        location / {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}
+EOF
+        log "Nginx 配置已创建"
+    fi
+}
+
+check_containers() {
+    info "检查容器状态..."
+
+    # Check each container
+    local containers=("subforge-db" "subforge-backend" "subforge-nginx")
+    local all_healthy=true
+
+    for container in "${containers[@]}"; do
+        local status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "not found")
+        local health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "none")
+
+        if [ "$status" = "running" ]; then
+            if [ "$health" = "healthy" ] || [ "$health" = "none" ]; then
+                log "$container: 运行正常"
+            else
+                warn "$container: 运行中但健康检查失败 ($health)"
+                all_healthy=false
+            fi
+        else
+            warn "$container: 未运行 ($status)"
+            all_healthy=false
+        fi
+    done
+
+    if [ "$all_healthy" = true ]; then
+        log "所有容器运行正常"
+    else
+        warn "部分容器有问题，尝试重启..."
+        cd "$INSTALL_DIR"
+        docker compose down 2>/dev/null || true
+        sleep 2
+        docker compose up -d
+        sleep 5
+    fi
+}
+
 wait_health() {
     info "等待服务就绪..."
 
@@ -688,6 +797,7 @@ main() {
 
     # Setup project
     clone_repo
+    ensure_nginx_config
     load_images
     generate_config
     build_frontend
@@ -695,9 +805,13 @@ main() {
     # Start services
     start_services
     wait_health
+    check_containers
 
     # Setup SSL if domain provided
     setup_ssl
+
+    # Final container check
+    check_containers
 
     # Install CLI tool
     install_cli
