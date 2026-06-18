@@ -151,6 +151,12 @@ EOF
 }
 
 build_frontend() {
+    # Skip if prebuilt frontend image is loaded
+    if docker image inspect subforge-frontend:latest >/dev/null 2>&1; then
+        log "使用预构建前端镜像，跳过编译"
+        return
+    fi
+
     info "编译前端..."
     cd "$INSTALL_DIR/frontend"
 
