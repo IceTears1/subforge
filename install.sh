@@ -642,7 +642,7 @@ ensure_nginx_config() {
 
     # Create default nginx config if not exists
     if [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf" ]; then
-        cat > "$INSTALL_DIR/nginx/nginx-python.conf" <<'EOF'
+        cat > "$INSTALL_DIR/nginx/nginx-python.conf" <<EOF
 worker_processes auto;
 
 events {
@@ -657,7 +657,7 @@ http {
     client_max_body_size 10m;
 
     # Rate limiting
-    limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+    limit_req_zone \$binary_remote_addr zone=api:10m rate=30r/s;
 
     # Gzip
     gzip on;
@@ -680,10 +680,10 @@ http {
         location /api/ {
             limit_req zone=api burst=50 nodelay;
             proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
             proxy_read_timeout 300s;
         }
 
@@ -691,14 +691,14 @@ http {
         location /sub/ {
             limit_req zone=api burst=20 nodelay;
             proxy_pass http://172.17.0.1:${BACKEND_PORT:-8081};
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
         }
 
         # Frontend (static files)
         location / {
             root /usr/share/nginx/html;
-            try_files $uri $uri/ /index.html;
+            try_files \$uri \$uri/ /index.html;
         }
     }
 }
