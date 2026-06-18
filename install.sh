@@ -428,27 +428,102 @@ setup_aliyun_ssl() {
     mkdir -p "$CERT_DIR"
 
     echo ""
-    echo -e "${YELLOW}═══════════════════════════════════════${NC}"
-    echo -e "${YELLOW}  阿里云 SSL 证书申请步骤${NC}"
-    echo -e "${YELLOW}═══════════════════════════════════════${NC}"
-    echo ""
-    echo -e "  1. 请登录阿里云控制台"
-    echo -e "     ${CYAN}https://yundun.console.aliyun.com/?p=cas${NC}"
-    echo ""
-    echo -e "  2. 免费申请 SSL 证书"
-    echo -e "     - 域名: ${CYAN}${DOMAIN}${NC}"
-    echo -e "     - 验证方式: DNS 验证"
-    echo ""
-    echo -e "  3. 证书签发后，下载 Nginx 格式证书"
-    echo ""
-    echo -e "  4. 将证书文件放到: ${CYAN}${CERT_DIR}/${NC}"
-    echo -e "     - ${CYAN}${DOMAIN}.pem${NC} (证书文件)"
-    echo -e "     - ${CYAN}${DOMAIN}.key${NC} (私钥文件)"
-    echo ""
+    info "开始自动申请阿里云 SSL 证书..."
 
-    read -p "$(echo -e ${YELLOW}证书文件已准备好? [Y/n]: ${NC})" cert_ready
+    # Step 1: Create certificate order
+    info "创建证书订单..."
+    ORDER_ID=$(aliyun cas CreateCertificateForPackageRequest \
+        --profile subforge \
+        --ProductCode "symantec-free-1-free" \
+        --Domain "$DOMAIN" \
+        --ValidateType "DNS" \
+        --AutoDeleteDomain true 2>/dev/null | grep -o '"OrderNumber": *"[^"]*"' | cut -d'"' -f4)
 
-    if [[ ! "$cert_ready" =~ ^[Nn]$ ]]; then
+    if [ -z "$ORDER_ID" ]; then
+        warn "创建证书订单失败，请手动申请"
+        echo -e "  1. 登录阿里云控制台: ${CYAN}https://yundun.console.aliyun.com/?p=cas${NC}"
+        echo -e "  2. 申请免费证书，域名: ${CYAN}${DOMAIN}${NC}"
+        echo -e "  3. 下载 Nginx 格式证书到: ${CYAN}${CERT_DIR}/${NC}"
+        echo ""
+        read -p "$(echo -e ${YELLOW}证书文件已准备好? [Y/n]: ${NC})" cert_ready
+        if [[ "$cert_ready" =~ ^[Nn]$ ]]; then
+            return
+        fi
+    else
+        log "证书订单已创建: $ORDER_ID"
+
+        # Step 2: Get DNS validation record
+        info "获取 DNS 验证记录..."
+        sleep 3
+
+        DNS_INFO=$(aliyun cas DescribeCertificateState \
+            --profile subforge \
+            --OrderNumber "$ORDER_ID" 2>/dev/null)
+
+        DNS_NAME=$(echo "$DNS_INFO" | grep -o '"DnsName": *"[^"]*"' | cut -d'"' -f4)
+        DNS_VALUE=$(echo "$DNS_INFO" | grep -o '"DnsValue": *"[^"]*"' | cut -d'"' -f4)
+
+        if [ -n "$DNS_NAME" ] && [ -n "$DNS_VALUE" ]; then
+            echo ""
+            echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+            echo -e "${YELLOW}  请添加以下 DNS 解析记录${NC}"
+            echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+            echo ""
+            echo -e "  记录类型: ${CYAN}TXT${NC}"
+            echo -e "  主机记录: ${CYAN}${DNS_NAME}${NC}"
+            echo -e "  记录值:   ${CYAN}${DNS_VALUE}${NC}"
+            echo ""
+            echo -e "  ${DIM}请在阿里云域名管理中添加此 TXT 记录${NC}"
+            echo -e "  ${DIM}添加后等待验证通过（通常需要几分钟）${NC}"
+            echo ""
+
+            # Wait for validation
+            info "等待证书签发..."
+            MAX_WAIT=300
+            COUNT=0
+            while [ $COUNT -lt $MAX_WAIT ]; do
+                CERT_STATUS=$(aliyun cas DescribeCertificateState \
+                    --profile subforge \
+                    --OrderNumber "$ORDER_ID" 2>/dev/null | grep -o '"CertificateStatus": *"[^"]*"' | cut -d'"' -f4)
+
+                if [ "$CERT_STATUS" = "ISSUED" ] || [ "$CERT_STATUS" = "DV_CERTISSUED" ]; then
+                    log "证书已签发!"
+                    break
+                fi
+
+                echo -ne "\r${DIM}等待中... (${COUNT}s / ${MAX_WAIT}s)${NC}"
+                sleep 10
+                COUNT=$((COUNT + 10))
+            done
+            echo ""
+
+            # Step 3: Download certificate
+            if [ "$CERT_STATUS" = "ISSUED" ] || [ "$CERT_STATUS" = "DV_CERTISSUED" ]; then
+                info "下载证书..."
+
+                # Get certificate content
+                CERT_PEM=$(aliyun cas GetCertificateContent \
+                    --profile subforge \
+                    --CertificateId "$ORDER_ID" 2>/dev/null | grep -o '"Cert": *"[^"]*"' | cut -d'"' -f4)
+                KEY_PEM=$(aliyun cas GetCertificateContent \
+                    --profile subforge \
+                    --CertificateId "$ORDER_ID" 2>/dev/null | grep -o '"Key": *"[^"]*"' | cut -d'"' -f4)
+
+                if [ -n "$CERT_PEM" ] && [ -n "$KEY_PEM" ]; then
+                    echo "$CERT_PEM" > "$CERT_DIR/${DOMAIN}.pem"
+                    echo "$KEY_PEM" > "$CERT_DIR/${DOMAIN}.key"
+                    log "证书已保存到: $CERT_DIR"
+                else
+                    warn "下载证书内容失败，请手动下载"
+                fi
+            else
+                warn "证书签发超时，请稍后手动下载"
+            fi
+        fi
+    fi
+
+    # Check if cert files exist
+    if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
         # Update nginx config for Alibaba Cloud SSL
         cat > "$INSTALL_DIR/nginx/nginx.conf" <<EOF
 server {
@@ -476,14 +551,13 @@ server {
 }
 EOF
 
-        # Update docker-compose to mount certs
         # Create symlink for nginx
         mkdir -p "$INSTALL_DIR/certs"
         ln -sf "$CERT_DIR" "$INSTALL_DIR/certs/$DOMAIN"
 
         log "阿里云 SSL 配置完成"
     else
-        warn "跳过证书配置"
+        warn "证书文件不存在，请手动配置"
     fi
 }
 
