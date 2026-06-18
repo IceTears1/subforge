@@ -155,6 +155,13 @@ check_existing_install() {
         [ -n "$ALI_SK" ] && echo -e "  阿里云 SK:    ${CYAN}${ALI_SK:0:4}****${NC}"
         echo ""
 
+        # 端口冲突检测
+        if [ "$BACKEND_PORT" = "$SSL_PORT" ] || [ "$BACKEND_PORT" = "$FRONTEND_PORT" ]; then
+            warn "端口冲突！后端端口不能与前端或 HTTPS 端口相同"
+            warn "已自动修正: BACKEND_PORT=3002"
+            BACKEND_PORT=3002
+        fi
+
         echo -e "${YELLOW}是否使用已有配置和数据? [Y/n]${NC}"
         read -p "> " use_existing
         if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
@@ -231,6 +238,18 @@ interactive_config() {
     echo -e "${YELLOW}HTTPS 端口 [${SSL_PORT}]${NC}"
     read -p "> " input
     SSL_PORT="${input:-$SSL_PORT}"
+
+    # 端口冲突检测
+    if [ "$BACKEND_PORT" = "$SSL_PORT" ] || [ "$BACKEND_PORT" = "$FRONTEND_PORT" ]; then
+        warn "端口冲突！后端端口不能与前端或 HTTPS 端口相同"
+        warn "已自动修正: BACKEND_PORT=3002"
+        BACKEND_PORT=3002
+    fi
+    if [ "$FRONTEND_PORT" = "$SSL_PORT" ]; then
+        warn "端口冲突！前端端口不能与 HTTPS 端口相同"
+        warn "已自动修正: SSL_PORT=3003"
+        SSL_PORT=3003
+    fi
 
     # Admin username
     echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
