@@ -122,14 +122,16 @@ check_existing_install() {
         [ -n "${DB_PASSWORD:-}" ] && echo -e "  数据库密码:   ${CYAN}${DB_PASSWORD}${NC}"
         echo ""
 
-        read -p "$(echo -e ${YELLOW}是否使用已有配置和数据? [Y/n]: ${NC})" use_existing
+        echo -e "${YELLOW}是否使用已有配置和数据? [Y/n]${NC}"
+        read -p "> " use_existing
         if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
             USE_EXISTING_DATA=true
             log "将使用已有配置和数据"
             return
         fi
 
-        read -p "$(echo -e ${YELLOW}是否备份数据库? [Y/n]: ${NC})" backup_db
+        echo -e "${YELLOW}是否备份数据库? [Y/n]${NC}"
+        read -p "> " backup_db
         if [[ ! "$backup_db" =~ ^[Nn]$ ]]; then
             backup_database
         fi
@@ -165,24 +167,29 @@ interactive_config() {
     fi
 
     # Port
-    read -p "$(echo -e ${YELLOW}访问端口 [${PORT}]: ${NC})" input
+    echo -e "${YELLOW}访问端口 [${PORT}]${NC}"
+    read -p "> " input
     PORT="${input:-$PORT}"
 
     # Admin username
-    read -p "$(echo -e ${YELLOW}管理员账户 [${ADMIN_USERNAME}]: ${NC})" input
+    echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
+    read -p "> " input
     ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
 
     # Admin password
-    read -p "$(echo -e ${YELLOW}管理员密码 [随机生成]: ${NC})" input
+    echo -e "${YELLOW}管理员密码 随机生成${NC}"
+    read -p "> " input
     ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
 
     # Domain (optional)
     echo ""
     echo -e "${DIM}--- 可选: 域名/SSL 配置 留空跳过 ---${NC}"
-    read -p "$(echo -e ${YELLOW}域名 例: example.com: ${NC})" input
+    echo -e "${YELLOW}域名 例: example.com${NC}"
+    read -p "> " input
     DOMAIN="${input:-}"
     if [ -n "$DOMAIN" ]; then
-        read -p "$(echo -e ${YELLOW}邮箱 用于SSL证书: ${NC})" input
+        echo -e "${YELLOW}邮箱 用于SSL证书${NC}"
+        read -p "> " input
         EMAIL="${input:-}"
     fi
 
@@ -198,7 +205,8 @@ interactive_config() {
     [ -n "$EMAIL" ] && echo -e "  邮箱:         ${CYAN}${EMAIL}${NC}"
     echo ""
 
-    read -p "$(echo -e ${YELLOW}确认开始安装? [Y/n]: ${NC})" confirm
+    echo -e "${YELLOW}确认开始安装? [Y/n]${NC}"
+    read -p "> " confirm
     if [[ "$confirm" =~ ^[Nn]$ ]]; then
         error "安装已取消"
     fi
