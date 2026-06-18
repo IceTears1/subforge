@@ -172,7 +172,11 @@ build_frontend() {
 
 start_services() {
     info "启动服务..."
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || error "无法进入安装目录: $INSTALL_DIR"
+
+    if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ]; then
+        error "找不到 docker-compose.yml 文件"
+    fi
 
     docker compose down --remove-orphans 2>/dev/null || true
     docker compose up -d
