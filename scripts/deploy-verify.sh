@@ -13,11 +13,12 @@ NC='\033[0m'
 
 INSTALL_DIR="/opt/subforge"
 
-# Fixed port and read admin password from .env
-PORT=3001
+# Read port and admin password from .env
 if [ -f "$INSTALL_DIR/.env" ]; then
+    PORT=$(grep -E '^FRONTEND_PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
     ADMIN_PASSWORD=$(grep -E '^ADMIN_PASSWORD=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
 fi
+PORT=${PORT:-3001}
 ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
 BASE_URL="http://localhost:${PORT}"
 PASS=0

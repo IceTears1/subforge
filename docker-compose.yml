@@ -2,14 +2,18 @@
 # SubForge Docker Compose
 # ========================================
 # 端口配置：
-#   前端 (nginx)  → 3001 (HTTP)
-#   后端 (python) → 45001 (API, host 网络)
-#   数据库 (pg)   → 45000 (PostgreSQL)
-#   HTTPS         → SSL_PORT (默认 3002，可配置)
+#   前端 (nginx)  → FRONTEND_PORT (默认 3001)
+#   后端 (python) → BACKEND_PORT (默认 3002, host 网络)
+#   数据库 (pg)   → DB_PORT (默认 45000)
+#   HTTPS         → SSL_PORT (默认 3003，可配置)
 #
 # 访问地址：
-#   HTTP:  http://YOUR_IP:3001
-#   HTTPS: https://YOUR_DOMAIN (配置 SSL 后)
+#   HTTP:  http://YOUR_IP:FRONTEND_PORT
+#   HTTPS: https://YOUR_DOMAIN:SSL_PORT (配置 SSL 后)
+#
+# 注意：三个端口互相依赖
+#   - Backend 的 DB_PORT 必须等于 postgres 的宿主机映射端口
+#   - Nginx 的 BACKEND_PORT 必须等于 backend 的监听端口
 # ========================================
 
 services:
@@ -24,7 +28,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "45000:5432"
+      - "${DB_PORT:-45000}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-subforge}"]
       interval: 5s
@@ -45,18 +49,18 @@ services:
     network_mode: host
     environment:
       DB_HOST: localhost
-      DB_PORT: 45000
+      DB_PORT: ${DB_PORT:-45000}
       DB_NAME: ${DB_NAME:-subforge}
       DB_USER: ${DB_USER:-subforge}
       DB_PASSWORD: ${DB_PASSWORD:-subforge123}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
-      BACKEND_PORT: 45001
+      BACKEND_PORT: ${BACKEND_PORT:-3002}
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:45001/api/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:${BACKEND_PORT:-3002}/api/health')\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -66,10 +70,10 @@ services:
     container_name: subforge-nginx
     restart: unless-stopped
     ports:
-      - "3001:80"
-      - "${SSL_PORT:-3002}:443"
+      - "${FRONTEND_PORT:-3001}:80"
+      - "${SSL_PORT:-3003}:443"
     environment:
-      - BACKEND_PORT=45001
+      - BACKEND_PORT=${BACKEND_PORT:-3002}
       - DOMAIN=${DOMAIN:-}
     volumes:
       - ./certs:/etc/nginx/certs:ro

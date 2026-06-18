@@ -20,15 +20,15 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.1.1"
+VERSION="1.1.2"
 
-# Fixed port scheme
+# Default ports (configurable via interactive prompts)
 FRONTEND_PORT=3001
-BACKEND_PORT=45001
+BACKEND_PORT=3002
 DB_PORT=45000
+SSL_PORT=3003
 
-# Configurable
-SSL_PORT=3002
+# Other config
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD=""
 DOMAIN=""
@@ -131,9 +131,10 @@ check_existing_install() {
         source "$INSTALL_DIR/.env" 2>/dev/null || true
 
         # Set defaults from existing config
-        FRONTEND_PORT=3001
-        BACKEND_PORT=45001
-        DB_PORT=45000
+        FRONTEND_PORT="${FRONTEND_PORT:-3001}"
+        BACKEND_PORT="${BACKEND_PORT:-3002}"
+        DB_PORT="${DB_PORT:-45000}"
+        SSL_PORT="${SSL_PORT:-3003}"
         ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
         ADMIN_PASSWORD="${ADMIN_PASSWORD:-****}"
         DOMAIN="${DOMAIN:-}"
@@ -141,10 +142,10 @@ check_existing_install() {
         ALI_AK="${ALI_AK:-}"
         ALI_SK="${ALI_SK:-}"
 
-        echo -e "  前端端口:     ${CYAN}3001 (固定)${NC}"
-        echo -e "  后端端口:     ${CYAN}45001 (固定)${NC}"
-        echo -e "  数据库端口:   ${CYAN}45000 (固定)${NC}"
-        echo -e "  HTTPS 端口:   ${CYAN}${SSL_PORT:-443}${NC}"
+        echo -e "  前端端口:     ${CYAN}${FRONTEND_PORT}${NC}"
+        echo -e "  后端端口:     ${CYAN}${BACKEND_PORT}${NC}"
+        echo -e "  数据库端口:   ${CYAN}${DB_PORT}${NC}"
+        echo -e "  HTTPS 端口:   ${CYAN}${SSL_PORT}${NC}"
         echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
         echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
         [ -n "${DB_PASSWORD:-}" ] && echo -e "  数据库密码:   ${CYAN}${DB_PASSWORD}${NC}"
@@ -196,22 +197,40 @@ interactive_config() {
     # Load existing config if available
     if [ -f "$INSTALL_DIR/.env" ]; then
         source "$INSTALL_DIR/.env" 2>/dev/null || true
-        FRONTEND_PORT=3001
-        BACKEND_PORT=45001
-        DB_PORT=45000
+        FRONTEND_PORT="${FRONTEND_PORT:-3001}"
+        BACKEND_PORT="${BACKEND_PORT:-3002}"
+        DB_PORT="${DB_PORT:-45000}"
+        SSL_PORT="${SSL_PORT:-3003}"
         ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
         ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
         DOMAIN="${DOMAIN:-}"
         EMAIL="${EMAIL:-}"
         ALI_AK="${ALI_AK:-}"
         ALI_SK="${ALI_SK:-}"
-        SSL_PORT="${SSL_PORT:-443}"
     fi
 
     if [ "$USE_EXISTING_DATA" = true ]; then
         log "使用已有配置"
         return
     fi
+
+    # Port configuration
+    echo -e "${DIM}--- 端口配置 ---${NC}"
+    echo -e "${YELLOW}前端端口 [${FRONTEND_PORT}]${NC}"
+    read -p "> " input
+    FRONTEND_PORT="${input:-$FRONTEND_PORT}"
+
+    echo -e "${YELLOW}后端端口 [${BACKEND_PORT}]${NC}"
+    read -p "> " input
+    BACKEND_PORT="${input:-$BACKEND_PORT}"
+
+    echo -e "${YELLOW}数据库端口 [${DB_PORT}]${NC}"
+    read -p "> " input
+    DB_PORT="${input:-$DB_PORT}"
+
+    echo -e "${YELLOW}HTTPS 端口 [${SSL_PORT}]${NC}"
+    read -p "> " input
+    SSL_PORT="${input:-$SSL_PORT}"
 
     # Admin username
     echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
@@ -285,9 +304,9 @@ interactive_config() {
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
     echo -e "${CYAN}${BOLD}  📋 配置确认${NC}"
     echo -e "${CYAN}${BOLD}═══════════════════════════════════════${NC}"
-    echo -e "  前端端口:     ${CYAN}3001 (固定)${NC}"
-    echo -e "  后端端口:     ${CYAN}45001 (固定)${NC}"
-    echo -e "  数据库端口:   ${CYAN}45000 (固定)${NC}"
+    echo -e "  前端端口:     ${CYAN}${FRONTEND_PORT}${NC}"
+    echo -e "  后端端口:     ${CYAN}${BACKEND_PORT}${NC}"
+    echo -e "  数据库端口:   ${CYAN}${DB_PORT}${NC}"
     echo -e "  HTTPS 端口:   ${CYAN}${SSL_PORT}${NC}"
     echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
@@ -341,13 +360,13 @@ generate_config() {
         [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
 
         cat > .env <<EOF
-# 固定端口
-FRONTEND_PORT=3001
-BACKEND_PORT=45001
-DB_PORT=45000
+# 端口配置
+FRONTEND_PORT=${FRONTEND_PORT}
+BACKEND_PORT=${BACKEND_PORT}
+DB_PORT=${DB_PORT}
+SSL_PORT=${SSL_PORT}
 
-# HTTPS 配置
-SSL_PORT=${SSL_PORT:-443}
+# 域名/SSL
 DOMAIN=${DOMAIN:-}
 
 # 数据库
@@ -411,7 +430,7 @@ server {
 
     # API reverse proxy
     location /api/ {
-        proxy_pass http://172.17.0.1:45001;
+        proxy_pass http://172.17.0.1:${BACKEND_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -421,7 +440,7 @@ server {
 
     # Client subscription endpoint
     location /sub/ {
-        proxy_pass http://172.17.0.1:45001;
+        proxy_pass http://172.17.0.1:${BACKEND_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
@@ -687,7 +706,7 @@ http {
         # API reverse proxy
         location /api/ {
             limit_req zone=api burst=50 nodelay;
-            proxy_pass http://172.17.0.1:45001;
+            proxy_pass http://172.17.0.1:${BACKEND_PORT};
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -698,7 +717,7 @@ http {
         # Client subscription endpoint
         location /sub/ {
             limit_req zone=api burst=20 nodelay;
-            proxy_pass http://172.17.0.1:45001;
+            proxy_pass http://172.17.0.1:${BACKEND_PORT};
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
         }
@@ -715,7 +734,7 @@ EOF
     fi
 
     # Always update nginx config with current BACKEND_PORT
-    sed -i "s|proxy_pass http://172.17.0.1:[^;]*;|proxy_pass http://172.17.0.1:45001;|g" "$INSTALL_DIR/nginx/nginx-python.conf" 2>/dev/null || true
+    sed -i "s|proxy_pass http://172.17.0.1:[^;]*;|proxy_pass http://172.17.0.1:${BACKEND_PORT};|g" "$INSTALL_DIR/nginx/nginx-python.conf" 2>/dev/null || true
 }
 
 check_containers() {

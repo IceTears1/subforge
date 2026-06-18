@@ -12,7 +12,7 @@ else
     # HTTP mode: use standard template
     if [ -f /etc/nginx/nginx.conf.template ]; then
         envsubst '$BACKEND_PORT' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
-        echo "Nginx config generated with BACKEND_PORT=${BACKEND_PORT:-45001}"
+        echo "Nginx config generated with BACKEND_PORT=${BACKEND_PORT:-3002}"
     fi
 fi
 

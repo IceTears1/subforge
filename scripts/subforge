@@ -45,7 +45,11 @@ show_status() {
     docker compose ps
     echo ""
     echo -e "${CYAN}${BOLD}访问地址:${NC}"
-    echo -e "  http://localhost:3001"
+    if [ -f .env ]; then
+        PORT=$(grep -E '^FRONTEND_PORT=' .env | cut -d'=' -f2 | tr -d '[:space:]')
+    fi
+    PORT=${PORT:-3001}
+    echo -e "  http://localhost:${PORT}"
     echo ""
 }
 

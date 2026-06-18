@@ -17,6 +17,6 @@ ARG COMMIT=unknown
 RUN echo "${VERSION}" > /app/VERSION && \
     echo "${COMMIT}" > /app/COMMIT
 
-EXPOSE 45001
+EXPOSE 3002
 
 CMD ["python", "app.py"]

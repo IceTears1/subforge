@@ -33,8 +33,11 @@ fi
 
 cd "$INSTALL_DIR"
 
-# Fixed port
-PORT=3001
+# Read port from .env or use default
+if [ -f .env ]; then
+    PORT=$(grep -E '^FRONTEND_PORT=' .env | cut -d'=' -f2 | tr -d '[:space:]')
+fi
+PORT=${PORT:-3001}
 
 # Get current version
 CURRENT_COMMIT=$(git rev-parse --short HEAD)

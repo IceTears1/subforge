@@ -12,8 +12,8 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': 'http://localhost:45001',
-      '/sub': 'http://localhost:45001',
+      '/api': 'http://localhost:3002',
+      '/sub': 'http://localhost:3002',
     },
   },
   build: {
