@@ -338,6 +338,17 @@ start_services() {
     log "服务已启动"
 }
 
+install_cli() {
+    info "安装命令行工具..."
+
+    # Create /usr/local/bin/subforge symlink
+    if [ -f "$INSTALL_DIR/scripts/subforge" ]; then
+        ln -sf "$INSTALL_DIR/scripts/subforge" /usr/local/bin/subforge
+        chmod +x /usr/local/bin/subforge
+        log "命令行工具已安装: subforge"
+    fi
+}
+
 wait_health() {
     info "等待服务就绪..."
 
@@ -406,6 +417,9 @@ main() {
     # Setup SSL if domain provided
     setup_ssl
 
+    # Install CLI tool
+    install_cli
+
     PUBLIC_IP=$(get_public_ip)
 
     echo ""
@@ -424,14 +438,14 @@ main() {
     echo -e "    用户名: ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "    密  码: ${CYAN}${ADMIN_PASSWORD}${NC}"
     echo ""
-    echo -e "  ${BOLD}常用命令:${NC}"
-    echo -e "    ${DIM}查看日志:   cd ${INSTALL_DIR} && docker compose logs -f${NC}"
-    echo -e "    ${DIM}重启服务:   cd ${INSTALL_DIR} && docker compose restart${NC}"
-    echo -e "    ${DIM}停止服务:   cd ${INSTALL_DIR} && docker compose down${NC}"
-    echo -e "    ${DIM}查看状态:   cd ${INSTALL_DIR} && docker compose ps${NC}"
+    echo -e "  ${BOLD}快捷管理:${NC}"
+    echo -e "    ${CYAN}subforge${NC}  ${DIM}# 输入此命令打开交互式管理菜单${NC}"
+    echo ""
+    echo -e "  ${BOLD}其他命令:${NC}"
+    echo -e "    ${DIM}cd ${INSTALL_DIR} && docker compose logs -f${NC}"
+    echo -e "    ${DIM}cd ${INSTALL_DIR} && docker compose restart${NC}"
     if [ -n "$DOMAIN" ]; then
-        echo -e "    ${DIM}SSL 续期:   certbot renew${NC}"
-        echo -e "    ${DIM}SSL 状态:   certbot certificates${NC}"
+        echo -e "    ${DIM}certbot renew  # SSL 续期${NC}"
     fi
     echo ""
 }
