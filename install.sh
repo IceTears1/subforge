@@ -1,5 +1,5 @@
 #!/bin/bash
-# SubForge One-Click Installer v1.2.2
+# SubForge One-Click Installer v1.2.3
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 #    or: sudo bash install.sh
 
@@ -20,7 +20,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.2.2"
+VERSION="1.2.3"
 
 # Default ports (configurable via interactive prompts)
 FRONTEND_PORT=3001
