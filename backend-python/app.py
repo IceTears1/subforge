@@ -1949,6 +1949,8 @@ def get_version():
 
 @app.get("/api/update/version")
 def get_update_version():
+    import subprocess
+
     # Read version from VERSION file
     try:
         with open('/app/VERSION', 'r') as f:
@@ -1963,37 +1965,92 @@ def get_update_version():
     except Exception:
         current_commit = ""
 
+    # 尝试从 GitHub 获取最新版本
+    latest_version = current_version
+    has_update = False
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", "https://github.com/IceTears1/subforge.git"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            tags = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    tag = line.split('refs/tags/')[-1]
+                    if tag.startswith('v'):
+                        tags.append(tag)
+            if tags:
+                # 简单比较版本号
+                latest_tag = sorted(tags, key=lambda x: [int(p) for p in x[1:].split('.')], reverse=True)[0]
+                latest_version = latest_tag[1:]  # 移除 'v' 前缀
+                has_update = latest_version != current_version
+    except Exception as e:
+        logger.warning(f"Failed to check latest version: {e}")
+
     return {
         "current": current_version,
         "current_tag": current_version,
         "current_commit": current_commit,
-        "latest": current_version,
-        "latest_tag": current_version,
-        "has_update": False,
+        "latest": latest_version,
+        "latest_tag": latest_version,
+        "has_update": has_update,
         "changelog": "",
-        "last_check": "",
+        "last_check": get_current_time().isoformat(),
         "update_mode": "tag",
         "updating": False
     }
 
 @app.get("/api/update/releases")
 def get_releases():
-    # Read version from VERSION file
+    import subprocess
+
+    # Read current version
     try:
         with open('/app/VERSION', 'r') as f:
             current_version = f.read().strip()
     except Exception:
         current_version = "1.0.0"
 
-    return [
-        {
-            "tag": current_version,
+    releases = []
+
+    # 尝试从 GitHub 获取所有 release
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", "https://github.com/IceTears1/subforge.git"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    tag = line.split('refs/tags/')[-1]
+                    if tag.startswith('v'):
+                        version = tag[1:]
+                        releases.append({
+                            "tag": tag,
+                            "commit_hash": "",
+                            "message": f"Version {version}",
+                            "date": "",
+                            "is_current": version == current_version
+                        })
+    except Exception as e:
+        logger.warning(f"Failed to fetch releases: {e}")
+
+    # 如果没有获取到，返回当前版本
+    if not releases:
+        releases.append({
+            "tag": f"v{current_version}",
             "commit_hash": "",
             "message": f"Version {current_version}",
             "date": "",
             "is_current": True
-        }
-    ]
+        })
+
+    return releases
 
 @app.get("/api/update/status")
 def get_update_status():
@@ -2010,16 +2067,162 @@ def get_changelog():
     ]
 
 @app.post("/api/update/latest")
-def update_to_latest():
-    return {"success": True, "from": "1.0.0", "to": "1.0.0", "steps": [], "timestamp": ""}
+def update_to_latest(current_user: User = Depends(require_admin)):
+    """更新到最新版本"""
+    import subprocess
+    import os
+
+    steps = []
+    from_version = "unknown"
+
+    try:
+        # 读取当前版本
+        try:
+            with open('/app/VERSION', 'r') as f:
+                from_version = f.read().strip()
+        except Exception:
+            pass
+
+        # Step 1: 拉取最新代码
+        steps.append({"name": "拉取代码", "status": "running", "message": "正在拉取最新代码..."})
+        result = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode == 0:
+            steps[-1]["status"] = "success"
+            steps[-1]["message"] = "代码已更新"
+        else:
+            steps[-1]["status"] = "failed"
+            steps[-1]["message"] = f"拉取失败: {result.stderr}"
+            return {"success": False, "from": from_version, "to": from_version, "steps": steps, "timestamp": get_current_time().isoformat()}
+
+        # Step 2: 读取新版本
+        steps.append({"name": "检查版本", "status": "running", "message": "正在检查新版本..."})
+        try:
+            with open('/opt/subforge/VERSION', 'r') as f:
+                to_version = f.read().strip()
+        except Exception:
+            to_version = from_version
+        steps[-1]["status"] = "success"
+        steps[-1]["message"] = f"版本: {from_version} → {to_version}"
+
+        # Step 3: 重建容器
+        steps.append({"name": "重建容器", "status": "running", "message": "正在重建 Docker 容器..."})
+        result = subprocess.run(
+            ["docker", "compose", "down"],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        result = subprocess.run(
+            ["docker", "compose", "up", "-d", "--build"],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        if result.returncode == 0:
+            steps[-1]["status"] = "success"
+            steps[-1]["message"] = "容器已重建并启动"
+        else:
+            steps[-1]["status"] = "failed"
+            steps[-1]["message"] = f"重建失败: {result.stderr}"
+            return {"success": False, "from": from_version, "to": to_version, "steps": steps, "timestamp": get_current_time().isoformat()}
+
+        return {"success": True, "from": from_version, "to": to_version, "steps": steps, "timestamp": get_current_time().isoformat()}
+
+    except Exception as e:
+        logger.error(f"Update failed: {e}")
+        return {"success": False, "from": from_version, "to": from_version, "steps": steps, "error": str(e), "timestamp": get_current_time().isoformat()}
 
 @app.post("/api/update/tag")
-def update_to_tag():
-    return {"success": True, "from": "1.0.0", "to": "1.0.0", "steps": [], "timestamp": ""}
+def update_to_tag(req: dict, current_user: User = Depends(require_admin)):
+    """更新到指定版本"""
+    import subprocess
+
+    tag = req.get("tag", "")
+    if not tag:
+        raise HTTPException(status_code=400, detail="Tag is required")
+
+    steps = []
+    from_version = "unknown"
+
+    try:
+        # 读取当前版本
+        try:
+            with open('/app/VERSION', 'r') as f:
+                from_version = f.read().strip()
+        except Exception:
+            pass
+
+        # Step 1: 切换到指定 tag
+        steps.append({"name": "切换版本", "status": "running", "message": f"正在切换到 {tag}..."})
+        result = subprocess.run(
+            ["git", "fetch", "--tags"],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        result = subprocess.run(
+            ["git", "checkout", tag],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            steps[-1]["status"] = "success"
+            steps[-1]["message"] = f"已切换到 {tag}"
+        else:
+            steps[-1]["status"] = "failed"
+            steps[-1]["message"] = f"切换失败: {result.stderr}"
+            return {"success": False, "from": from_version, "to": tag, "steps": steps, "timestamp": get_current_time().isoformat()}
+
+        # Step 2: 重建容器
+        steps.append({"name": "重建容器", "status": "running", "message": "正在重建 Docker 容器..."})
+        result = subprocess.run(
+            ["docker", "compose", "down"],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        result = subprocess.run(
+            ["docker", "compose", "up", "-d", "--build"],
+            cwd="/opt/subforge",
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        if result.returncode == 0:
+            steps[-1]["status"] = "success"
+            steps[-1]["message"] = "容器已重建并启动"
+        else:
+            steps[-1]["status"] = "failed"
+            steps[-1]["message"] = f"重建失败: {result.stderr}"
+            return {"success": False, "from": from_version, "to": tag, "steps": steps, "timestamp": get_current_time().isoformat()}
+
+        return {"success": True, "from": from_version, "to": tag, "steps": steps, "timestamp": get_current_time().isoformat()}
+
+    except Exception as e:
+        logger.error(f"Update to tag failed: {e}")
+        return {"success": False, "from": from_version, "to": tag, "steps": steps, "error": str(e), "timestamp": get_current_time().isoformat()}
 
 @app.post("/api/update/rollback")
-def rollback():
-    return {"success": True, "from": "1.0.0", "to": "1.0.0", "steps": [], "timestamp": ""}
+def rollback(req: dict, current_user: User = Depends(require_admin)):
+    """回滚到指定版本"""
+    version = req.get("version", "")
+    if not version:
+        raise HTTPException(status_code=400, detail="Version is required")
+
+    # 复用 update_to_tag 逻辑
+    return update_to_tag({"tag": version}, current_user)
 
 @app.get("/api/audit")
 def get_audit(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
