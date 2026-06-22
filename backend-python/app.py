@@ -23,6 +23,19 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 import httpx
 
+# ─── Exporters ────────────────────────────────────────────────────────────────
+from exporters import (
+    generate_clash_yaml,
+    generate_singbox_json,
+    generate_base64_subscription,
+    generate_surge_config,
+    generate_loon_config,
+    generate_qx_config,
+)
+
+# ─── Pipeline ─────────────────────────────────────────────────────────────────
+from pipeline import SubscriptionPipeline
+
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -484,17 +497,23 @@ def export_all_subscriptions(target: str = "clash", current_user: User = Depends
     all_nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
 
     if target == "clash" or target == "mihomo":
-        yaml_content = generate_clash_yaml(all_nodes)
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(yaml_content, media_type="text/yaml")
+        content = generate_clash_yaml(all_nodes)
+        media_type = "text/yaml"
     elif target == "singbox":
-        json_content = generate_singbox_json(all_nodes)
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(json_content, media_type="application/json")
+        content = generate_singbox_json(all_nodes)
+        media_type = "application/json"
     elif target == "base64":
-        base64_content = generate_base64_subscription(all_nodes)
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(base64_content, media_type="text/plain")
+        content = generate_base64_subscription(all_nodes)
+        media_type = "text/plain"
+    elif target == "surge":
+        content = generate_surge_config(all_nodes)
+        media_type = "text/plain"
+    elif target == "loon":
+        content = generate_loon_config(all_nodes)
+        media_type = "text/plain"
+    elif target == "qx":
+        content = generate_qx_config(all_nodes)
+        media_type = "text/plain"
     else:
         lines = []
         for node in all_nodes:
@@ -507,8 +526,11 @@ def export_all_subscriptions(target: str = "clash", current_user: User = Depends
             elif node.node_type == "ss":
                 lines.append(f"ss://{node.server}:{node.port}")
 
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+        content = "\n".join(lines)
+        media_type = "text/plain"
+
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content, media_type=media_type)
 
 @app.get("/api/subscriptions/{sub_id}")
 def get_subscription(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -1402,6 +1424,15 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
     elif target == "base64":
         content = generate_base64_subscription(nodes)
         media_type = "text/plain"
+    elif target == "surge":
+        content = generate_surge_config(nodes)
+        media_type = "text/plain"
+    elif target == "loon":
+        content = generate_loon_config(nodes)
+        media_type = "text/plain"
+    elif target == "qx":
+        content = generate_qx_config(nodes)
+        media_type = "text/plain"
     else:
         lines = []
         for node in nodes:
@@ -1421,7 +1452,6 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
 
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse(content, media_type=media_type)
-        return PlainTextResponse("\n".join(lines), media_type="text/plain")
 
 @app.get("/sub/{token}/export/group")
 def export_subscription_by_group(
@@ -1453,14 +1483,23 @@ def export_subscription_by_group(
         raise HTTPException(status_code=404, detail="No nodes found for this group")
 
     if target == "clash" or target == "mihomo":
-        yaml_content = generate_clash_yaml(nodes)
-        return PlainTextResponse(yaml_content, media_type="text/yaml")
+        content = generate_clash_yaml(nodes)
+        media_type = "text/yaml"
     elif target == "singbox":
-        json_content = generate_singbox_json(nodes)
-        return PlainTextResponse(json_content, media_type="application/json")
+        content = generate_singbox_json(nodes)
+        media_type = "application/json"
     elif target == "base64":
-        base64_content = generate_base64_subscription(nodes)
-        return PlainTextResponse(base64_content, media_type="text/plain")
+        content = generate_base64_subscription(nodes)
+        media_type = "text/plain"
+    elif target == "surge":
+        content = generate_surge_config(nodes)
+        media_type = "text/plain"
+    elif target == "loon":
+        content = generate_loon_config(nodes)
+        media_type = "text/plain"
+    elif target == "qx":
+        content = generate_qx_config(nodes)
+        media_type = "text/plain"
     else:
         lines = []
         for node in nodes:
@@ -1472,7 +1511,10 @@ def export_subscription_by_group(
                 lines.append(f"trojan://{node.server}:{node.port}")
             elif node.node_type == "ss":
                 lines.append(f"ss://{node.server}:{node.port}")
-        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+        content = "\n".join(lines)
+        media_type = "text/plain"
+
+    return PlainTextResponse(content, media_type=media_type)
 
 def generate_clash_yaml(nodes: list) -> str:
     """Generate Clash/Mihomo YAML format"""
