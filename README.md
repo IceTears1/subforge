@@ -1,4 +1,4 @@
-# ⚡ SubForge v1.2.4
+# ⚡ SubForge v1.2.8
 
 VPN 订阅链接统一转换平台 — 一键部署，扁平化 UI，多账户支持
 
@@ -32,9 +32,15 @@ SSH 登录 VPS 后执行：
 # 安装最新版本
 curl -fsSL "https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh?t=$(date +%s)" -o install.sh; sudo bash install.sh
 
-# 安装指定版本
-curl -fsSL "https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh?t=$(date +%s)" -o install.sh; sudo bash install.sh -v 1.2.4
+# 安装指定版本（从 GitHub Releases 下载预构建镜像）
+curl -fsSL "https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh?t=$(date +%s)" -o install.sh; sudo bash install.sh -v 1.2.8
 ```
+
+### 安装说明
+
+- **最新版本**: 自动从 main 分支克隆代码，从 Releases 下载预构建镜像
+- **指定版本**: 克隆指定 tag，从 Releases 下载对应版本的预构建镜像
+- **镜像下载失败**: 自动回退到本地构建（需要较长时间）
 
 ### 安装流程
 
