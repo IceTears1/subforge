@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.4 (2026-06-22)
+
+### Bug Fixes
+- **修复版本号显示** — Docker 构建时正确传入 VERSION 和 COMMIT 参数
+- **更新部署脚本** — install.sh 和 update-vps.sh 自动传递版本信息
+
 ## v1.2.3 (2026-06-22)
 
 ### Bug Fixes
