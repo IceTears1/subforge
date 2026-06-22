@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.2 (2026-06-22)
+
+### Features
+- **前端格式支持** — 更新前端 UI 支持所有新增输出格式
+- **修复 QX 格式** — 修正 Quantumult X 的 target 参数为 `qx`
+
 ## v1.4.1 (2026-06-22)
 
 ### Features
