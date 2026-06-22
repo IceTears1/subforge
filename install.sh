@@ -421,9 +421,9 @@ generate_config() {
         source .env 2>/dev/null || true
     else
         # Generate new config
-        [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(gen_pass 24)
-        [ -z "$JWT_SECRET" ] && JWT_SECRET=$(gen_pass 32)
-        [ -z "$ADMIN_PASSWORD" ] && ADMIN_PASSWORD=$(gen_pass 16)
+        [ -z "${DB_PASSWORD:-}" ] && DB_PASSWORD=$(gen_pass 24)
+        [ -z "${JWT_SECRET:-}" ] && JWT_SECRET=$(gen_pass 32)
+        [ -z "${ADMIN_PASSWORD:-}" ] && ADMIN_PASSWORD=$(gen_pass 16)
 
         cat > .env <<EOF
 # 端口配置
@@ -476,7 +476,7 @@ build_frontend() {
 }
 
 setup_ssl() {
-    if [ -z "$DOMAIN" ]; then
+    if [ -z "${DOMAIN:-}" ]; then
         return
     fi
 
