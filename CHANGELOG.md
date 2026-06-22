@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.0 (2026-06-22)
+
+### Security
+- **安全警告** — 启动时检查 JWT_SECRET 和 ADMIN_PASSWORD 是否为默认值
+- **CORS 配置** — 支持通过环境变量 CORS_ORIGINS 自定义允许的来源
+- **API 认证** — /api/metrics 端点现在需要管理员权限
+- **错误处理** — 将所有 bare except 替换为 except Exception
+- **日志系统** — 使用 Python logging 模块替代 print() 语句
+
+### Bug Fixes
+- **修复数据库索引** — 为 subscriptions.user_id、nodes.subscription_id、audit_logs.created_at 添加索引
+- **修复级联删除** — 删除订阅时自动删除关联节点
+
 ## v1.2.8 (2026-06-22)
 
 ### Features

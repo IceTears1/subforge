@@ -1,8 +1,8 @@
 #!/bin/bash
-# SubForge One-Click Installer v1.2.8
+# SubForge One-Click Installer v1.3.0
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 #    or: sudo bash install.sh
-#    or: sudo bash install.sh -v 1.2.8  (指定版本安装)
+#    or: sudo bash install.sh -v 1.3.0  (指定版本安装)
 
 set -euo pipefail
 
