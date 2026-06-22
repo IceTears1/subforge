@@ -9,3 +9,4 @@ pydantic==2.5.3
 httpx==0.26.0
 pyyaml==6.0.1
 cloudscraper==1.2.71
+slowapi==0.1.9

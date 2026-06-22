@@ -15,6 +15,10 @@ from functools import lru_cache
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
@@ -307,6 +311,11 @@ seed_admin()
 # ─── App ──────────────────────────────────────────────────────────────────────
 app = FastAPI(title="SubForge API")
 
+# 速率限制
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # CORS 配置：允许所有来源（开发模式），生产环境应限制
 CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*').split(',')
 app.add_middleware(
@@ -317,13 +326,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 请求大小限制（1MB）
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    if request.headers.get("content-length"):
+        content_length = int(request.headers["content-length"])
+        if content_length > 1024 * 1024:  # 1MB
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "Request body too large"}
+            )
+    response = await call_next(request)
+    return response
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     # Get client IP from various headers
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
     if not client_ip:
