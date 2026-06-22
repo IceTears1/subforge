@@ -145,21 +145,14 @@ clone_repo() {
         fi
     else
         rm -rf "$INSTALL_DIR"
-        # 使用浅克隆 + sparse checkout 跳过大型文件
-        info "使用浅克隆加速下载..."
+        # 使用浅克隆
+        info "下载代码..."
         if [ -n "$INSTALL_VERSION" ]; then
-            git clone --depth 1 --branch "$TARGET_TAG" --filter=blob:limit=1m --sparse "$REPO" "$INSTALL_DIR" 2>/dev/null || \
             git clone --depth 1 --branch "$TARGET_TAG" "$REPO" "$INSTALL_DIR" || error "克隆版本 $TARGET_TAG 失败"
         else
-            git clone --depth 1 --filter=blob:limit=1m --sparse "$REPO" "$INSTALL_DIR" 2>/dev/null || \
             git clone --depth 1 "$REPO" "$INSTALL_DIR"
         fi
         cd "$INSTALL_DIR"
-        # Sparse checkout: 跳过 images 目录（Docker 镜像文件）
-        if [ -d ".git" ]; then
-            git sparse-checkout init --cone 2>/dev/null || true
-            git sparse-checkout set --no-cone '/*' '!images' 2>/dev/null || true
-        fi
         log "代码已克隆 ($(cat VERSION 2>/dev/null || echo 'unknown'))"
     fi
 }
