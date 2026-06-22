@@ -141,17 +141,46 @@ Get subscription's public access token.
 
 ## Public Subscription Endpoint (No Auth)
 
-### GET /sub/:token
+### GET /sub/:token/export
 Get rendered subscription content.
 
 **Query Params:**
 - `target` (string, default: "clash"): output format
-  - `clash`, `singbox`, `surge`, `loon`, `quanx`, `base64`
+  - `clash` - Clash/Mihomo YAML 格式
+  - `singbox` - sing-box JSON 格式
+  - `surge` - Surge 配置格式
+  - `loon` - Loon 配置格式
+  - `qx` - Quantumult X 配置格式
+  - `shadowrocket` - Shadowrocket Base64 URI 列表
+  - `base64` - Base64 编码的 URI 列表
 
 **Response:** Plain text subscription content
 
-### GET /sub/:token/merged
-Get all subscriptions merged.
+**示例:**
+```
+# Clash 格式
+http://your-server:3001/sub/{token}/export?target=clash
+
+# Shadowrocket 格式
+http://your-server:3001/sub/{token}/export?target=shadowrocket
+
+# Surge 格式
+http://your-server:3001/sub/{token}/export?target=surge
+```
+
+### GET /sub/:token/export/group
+按分组导出订阅内容。
+
+**Query Params:**
+- `target` (string): 输出格式
+- `group_by` (string): 分组方式 (`region`, `type`, `status`)
+- `group_value` (string): 分组值
+
+**示例:**
+```
+# 导出香港节点
+http://your-server:3001/sub/{token}/export/group?target=clash&group_by=region&group_value=HK
+```
 
 ---
 
@@ -399,12 +428,12 @@ Service health check.
 
 ## Client Usage
 
-### Clash
+### Clash/Mihomo
 ```yaml
 proxy-providers:
   subforge:
     type: http
-    url: "http://your-domain:8080/sub/YOUR_TOKEN?target=clash"
+    url: "http://your-domain:3001/sub/YOUR_TOKEN?target=clash"
     interval: 3600
 ```
 
@@ -415,7 +444,7 @@ proxy-providers:
     {
       "type": "urltest",
       "tag": "auto",
-      "url": "http://your-domain:8080/sub/YOUR_TOKEN?target=singbox",
+      "url": "http://your-domain:3001/sub/YOUR_TOKEN?target=singbox",
       "interval": "5m"
     }
   ]
@@ -425,11 +454,23 @@ proxy-providers:
 ### Surge
 ```ini
 [Proxy]
-#!subscribe http://your-domain:8080/sub/YOUR_TOKEN?target=surge
+#!subscribe http://your-domain:3001/sub/YOUR_TOKEN?target=surge
 ```
 
 ### Loon
 ```ini
 [Proxy]
-#!subscribe http://your-domain:8080/sub/YOUR_TOKEN?target=loon
+#!subscribe http://your-domain:3001/sub/YOUR_TOKEN?target=loon
+```
+
+### Quantumult X
+```ini
+[server_remote]
+http://your-domain:3001/sub/YOUR_TOKEN?target=qx, tag=SubForge, update-interval=172800, opt-parser=true, enabled=true
+```
+
+### Shadowrocket
+直接导入订阅链接即可：
+```
+http://your-domain:3001/sub/YOUR_TOKEN?target=shadowrocket
 ```
