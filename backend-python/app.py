@@ -5,10 +5,12 @@ import secrets
 import hashlib
 import re
 import logging
+import time
 import yaml
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
+from functools import lru_cache
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -38,6 +40,33 @@ def get_current_time():
 def get_utc_time():
     """获取 UTC 时间"""
     return datetime.utcnow()
+
+# ─── Simple Cache ─────────────────────────────────────────────────────────────
+class SimpleCache:
+    """简单的内存缓存"""
+    def __init__(self, ttl_seconds=300):
+        self.cache = {}
+        self.ttl = ttl_seconds
+
+    def get(self, key):
+        if key in self.cache:
+            value, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                return value
+            del self.cache[key]
+        return None
+
+    def set(self, key, value):
+        self.cache[key] = (value, time.time())
+
+    def delete(self, key):
+        self.cache.pop(key, None)
+
+    def clear(self):
+        self.cache.clear()
+
+# 订阅导出缓存（5分钟过期）
+subscription_cache = SimpleCache(ttl_seconds=300)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 DATABASE_URL = f"postgresql://{os.getenv('DB_USER', 'subforge')}:{os.getenv('DB_PASSWORD', 'subforge123')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'subforge')}"
@@ -446,12 +475,13 @@ def create_subscription(req: SubscriptionCreate, current_user: User = Depends(ge
 def export_all_subscriptions(target: str = "clash", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user_id = current_user.id
 
-    subs = db.query(Subscription).filter(Subscription.user_id == user_id, Subscription.status == 1).all()
+    # 使用单个查询获取所有节点（避免 N+1 查询）
+    sub_ids = db.query(Subscription.id).filter(
+        Subscription.user_id == user_id,
+        Subscription.status == 1
+    ).subquery()
 
-    all_nodes = []
-    for sub in subs:
-        nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
-        all_nodes.extend(nodes)
+    all_nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
 
     if target == "clash" or target == "mihomo":
         yaml_content = generate_clash_yaml(all_nodes)
@@ -627,6 +657,10 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
+
+    # 清除该订阅的缓存
+    for target in ["clash", "mihomo", "singbox", "base64", "plain"]:
+        subscription_cache.delete(f"sub:{sub.token}:{target}")
 
     # Log refresh start
     audit = AuditLog(user_id=current_user.id, username=current_user.username, action="refresh", resource="subscription", detail=f"refreshing: {sub.name}", ip="unknown", success=1)
@@ -1242,6 +1276,10 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
 @app.post("/api/nodes/speedtest-all")
 def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Test latency for all nodes across all subscriptions"""
+    import socket
+    import time
+    import concurrent.futures
+
     # Get all subscriptions for the current user
     subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
     sub_ids = [s.id for s in subs]
@@ -1253,69 +1291,62 @@ def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Sess
     nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
     results = []
 
-    for node in nodes:
-        try:
-            import socket
-            import time
-            import concurrent.futures
+    def test_node_latency(node):
+        """Test latency for a single node"""
+        def test_connection(port):
+            """Test TCP connection to a port"""
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                start_time = time.time()
+                result = sock.connect_ex((node.server, port))
+                end_time = time.time()
+                sock.close()
+                if result == 0:
+                    return int((end_time - start_time) * 1000)
+                return None
+            except Exception:
+                return None
 
-            def test_connection(port):
-                """Test TCP connection to a port"""
+        test_ports = [node.port, 80, 443, 8080, 8443]
+        latency = None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(test_connection, port): port for port in test_ports}
+            for future in concurrent.futures.as_completed(futures, timeout=5):
                 try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(2)
-                    start_time = time.time()
-                    result = sock.connect_ex((node.server, port))
-                    end_time = time.time()
-                    sock.close()
-                    if result == 0:
-                        return int((end_time - start_time) * 1000)
-                    return None
+                    result = future.result()
+                    if result is not None and latency is None:
+                        latency = result
                 except Exception:
-                    return None
+                    pass
 
-            test_ports = [node.port, 80, 443, 8080, 8443]
-            latency = None
+        if latency is not None:
+            node.latency = latency
+            return {"id": node.id, "name": node.name, "latency": latency, "status": "success"}
+        else:
+            try:
+                socket.gethostbyname(node.server)
+                node.latency = 999
+                return {"id": node.id, "name": node.name, "latency": 999, "status": "success"}
+            except Exception:
+                node.latency = -1
+                return {"id": node.id, "name": node.name, "latency": -1, "status": "failed"}
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                futures = {executor.submit(test_connection, port): port for port in test_ports}
-                for future in concurrent.futures.as_completed(futures, timeout=5):
-                    try:
-                        result = future.result()
-                        if result is not None and latency is None:
-                            latency = result
-                    except Exception:
-                        pass
+    # 使用线程池并行测试所有节点
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(test_node_latency, node): node for node in nodes}
+        for future in concurrent.futures.as_completed(futures, timeout=30):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                node = futures[future]
+                node.latency = -1
+                results.append({"id": node.id, "name": node.name, "latency": -1, "status": "failed"})
 
-            if latency is not None:
-                node.latency = latency
-                results.append({
-                    "id": node.id,
-                    "name": node.name,
-                    "latency": latency,
-                    "status": "success"
-                })
-            else:
-                try:
-                    socket.gethostbyname(node.server)
-                    node.latency = 999
-                    results.append({
-                        "id": node.id,
-                        "name": node.name,
-                        "latency": 999,
-                        "status": "success"
-                    })
-                except Exception:
-                    node.latency = -1
-                    results.append({
-                        "id": node.id,
-                        "name": node.name,
-                        "latency": -1,
-                        "status": "failed"
-                    })
-
-        except Exception as e:
-            node.latency = -1
+    db.commit()
+    return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
             results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
 
     # Save latency to database
@@ -1349,6 +1380,13 @@ def get_subscription_public(token: str, target: str = "clash", db: Session = Dep
 
 @app.get("/sub/{token}/export")
 def export_subscription(token: str, target: str = "clash", db: Session = Depends(get_db)):
+    # 检查缓存
+    cache_key = f"sub:{token}:{target}"
+    cached = subscription_cache.get(cache_key)
+    if cached:
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(cached, media_type="text/plain" if target == "base64" else "text/yaml" if target in ["clash", "mihomo"] else "application/json")
+
     sub = db.query(Subscription).filter(Subscription.token == token, Subscription.status == 1).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
@@ -1356,17 +1394,14 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
     nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
 
     if target == "clash" or target == "mihomo":
-        yaml_content = generate_clash_yaml(nodes)
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(yaml_content, media_type="text/yaml")
+        content = generate_clash_yaml(nodes)
+        media_type = "text/yaml"
     elif target == "singbox":
-        json_content = generate_singbox_json(nodes)
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(json_content, media_type="application/json")
+        content = generate_singbox_json(nodes)
+        media_type = "application/json"
     elif target == "base64":
-        base64_content = generate_base64_subscription(nodes)
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(base64_content, media_type="text/plain")
+        content = generate_base64_subscription(nodes)
+        media_type = "text/plain"
     else:
         lines = []
         for node in nodes:
@@ -1378,8 +1413,14 @@ def export_subscription(token: str, target: str = "clash", db: Session = Depends
                 lines.append(f"trojan://{node.server}:{node.port}")
             elif node.node_type == "ss":
                 lines.append(f"ss://{node.server}:{node.port}")
+        content = "\n".join(lines)
+        media_type = "text/plain"
 
-        from fastapi.responses import PlainTextResponse
+    # 缓存结果
+    subscription_cache.set(cache_key, content)
+
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content, media_type=media_type)
         return PlainTextResponse("\n".join(lines), media_type="text/plain")
 
 @app.get("/sub/{token}/export/group")
