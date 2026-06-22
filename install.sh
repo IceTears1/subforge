@@ -120,15 +120,15 @@ clone_repo() {
     if [ -d "$INSTALL_DIR/.git" ]; then
         cd "$INSTALL_DIR"
         OLD=$(cat VERSION 2>/dev/null || echo "unknown")
-        git fetch --tags 2>/dev/null || true
 
         if [ -n "$INSTALL_VERSION" ]; then
-            # Checkout specific version
-            git checkout "$TARGET_TAG" 2>/dev/null || error "版本 $TARGET_TAG 不存在"
+            # Fetch specific tag
+            git fetch --depth 1 origin tag "$TARGET_TAG" 2>/dev/null || error "版本 $TARGET_TAG 不存在"
+            git checkout "$TARGET_TAG" 2>/dev/null || error "切换到版本 $TARGET_TAG 失败"
             log "已切换到版本: $TARGET_TAG"
         else
-            # Pull latest from main
-            git fetch origin main 2>/dev/null
+            # Pull latest from main (shallow)
+            git fetch --depth 1 origin main 2>/dev/null
             git reset --hard origin/main 2>/dev/null
         fi
 
@@ -141,12 +141,21 @@ clone_repo() {
         fi
     else
         rm -rf "$INSTALL_DIR"
+        # 使用浅克隆 + sparse checkout 跳过大型文件
+        info "使用浅克隆加速下载..."
         if [ -n "$INSTALL_VERSION" ]; then
-            git clone --branch "$TARGET_TAG" "$REPO" "$INSTALL_DIR" || error "克隆版本 $TARGET_TAG 失败"
+            git clone --depth 1 --branch "$TARGET_TAG" --filter=blob:limit=1m --sparse "$REPO" "$INSTALL_DIR" 2>/dev/null || \
+            git clone --depth 1 --branch "$TARGET_TAG" "$REPO" "$INSTALL_DIR" || error "克隆版本 $TARGET_TAG 失败"
         else
-            git clone "$REPO" "$INSTALL_DIR"
+            git clone --depth 1 --filter=blob:limit=1m --sparse "$REPO" "$INSTALL_DIR" 2>/dev/null || \
+            git clone --depth 1 "$REPO" "$INSTALL_DIR"
         fi
         cd "$INSTALL_DIR"
+        # Sparse checkout: 跳过 images 目录（Docker 镜像文件）
+        if [ -d ".git" ]; then
+            git sparse-checkout init --cone 2>/dev/null || true
+            git sparse-checkout set --no-cone '/*' '!images' 2>/dev/null || true
+        fi
         log "代码已克隆 ($(cat VERSION 2>/dev/null || echo 'unknown'))"
     fi
 }
