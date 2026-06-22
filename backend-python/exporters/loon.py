@@ -48,7 +48,7 @@ def _generate_proxy_line(node_type: str, name: str, server: str, port: int, conf
         cipher = config.get("scy", "auto")
         tls = config.get("tls", False)
         transport = config.get("net", "tcp")
-        line = f"{name} = VMess, {server}, {port}, {uuid}, alterId={alterId}, cipher={cipher}"
+        line = f"{name} = VMess, {server}, {port}, {uuid}, alterId={alter_id}, cipher={cipher}"
         if tls:
             line += ", tls=true"
             if config.get("sni"):
