@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.3 (2026-06-22)
+
+### Frontend
+- **模块化优化** — 创建 constants/、composables/、utils/、types/ 模块
+- **修复内存泄漏** — useResponsive composable 替代重复的 resize 监听
+- **可复用表格列** — useNodeColumns composable 提供统一的节点表格列定义
+- **剪贴板 fallback** — 支持旧版浏览器的 clipboard API
+- **订阅导出工具** — 生成 Clash/sing-box/Base64 配置的工具函数
+
 ## v1.3.2 (2026-06-22)
 
 ### Performance
