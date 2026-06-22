@@ -2,9 +2,20 @@
 
 ## v1.2.4 (2026-06-22)
 
+### Features
+- **指定版本安装** — 安装脚本支持 `-v` 参数指定版本安装
+
 ### Bug Fixes
 - **修复版本号显示** — Docker 构建时正确传入 VERSION 和 COMMIT 参数
 - **更新部署脚本** — install.sh 和 update-vps.sh 自动传递版本信息
+- **修复订阅链接格式** — 前端生成正确的 /export 路径
+- **修复 base64 订阅生成** — 支持原始 params 字符串
+
+### Improvements
+- 优化安装完成后的订阅输出格式
+- 添加 ClashMeta 和默认订阅分类显示
+- 添加在线二维码链接
+- 更新 README 文档
 
 ## v1.2.3 (2026-06-22)
 
