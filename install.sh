@@ -21,7 +21,8 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-INSTALL_VERSION=""
+VERSION="1.2.4"  # 安装脚本版本
+INSTALL_VERSION=""  # 用户指定安装的版本
 
 # Parse command line arguments
 while getopts "v:" opt; do
