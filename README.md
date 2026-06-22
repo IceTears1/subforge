@@ -532,7 +532,22 @@ npm install
 npm run dev
 ```
 
-### 构建 Docker 镜像
+### 一键打包
+
+使用打包脚本自动构建镜像、创建 Release：
+
+```bash
+# 运行打包脚本
+bash scripts/build.sh
+```
+
+脚本会自动：
+1. 构建后端和前端 Docker 镜像
+2. 保存镜像到 `images/` 目录
+3. 提交更改并推送到 GitHub
+4. 创建 GitHub Release
+
+### 手动构建 Docker 镜像
 
 ```bash
 # 构建后端镜像
