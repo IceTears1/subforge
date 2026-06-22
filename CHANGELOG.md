@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.1 (2026-06-22)
+
+### Refactor
+- **后端模块化** — 创建 models/、parsers/、utils/、exporters/ 模块结构
+- **配置管理** — 提取 config.py 配置模块
+
 ## v1.3.0 (2026-06-22)
 
 ### Security
