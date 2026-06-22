@@ -1,11 +1,32 @@
 import os
+import sys
 import json
 import secrets
 import hashlib
 import re
+import logging
 import yaml
 import base64
 from datetime import datetime, timedelta, timezone
+from typing import Optional, List
+
+from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON, Index
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session, relationship
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel
+import httpx
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # 东八区 (UTC+8)
 CST = timezone(timedelta(hours=8))
@@ -17,18 +38,6 @@ def get_current_time():
 def get_utc_time():
     """获取 UTC 时间"""
     return datetime.utcnow()
-from typing import Optional, List
-
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from pydantic import BaseModel
-import httpx
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 DATABASE_URL = f"postgresql://{os.getenv('DB_USER', 'subforge')}:{os.getenv('DB_PASSWORD', 'subforge123')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'subforge')}"
@@ -36,6 +45,12 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
 JWT_EXPIRY = os.getenv('JWT_EXPIRY', '24h')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+
+# 安全检查：启动时验证关键环境变量
+if JWT_SECRET == 'change-me-in-production':
+    logger.warning("⚠️  JWT_SECRET 使用默认值，请设置环境变量 JWT_SECRET")
+if ADMIN_PASSWORD == 'admin123':
+    logger.warning("⚠️  ADMIN_PASSWORD 使用默认值，请设置环境变量 ADMIN_PASSWORD")
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 engine = create_engine(DATABASE_URL)
@@ -53,26 +68,32 @@ class User(Base):
     created_at = Column(DateTime, default=get_current_time)
     updated_at = Column(DateTime, default=get_current_time, onupdate=get_current_time)
 
+    def __repr__(self):
+        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     token = Column(String(32), unique=True, index=True)
     name = Column(String(128), nullable=False)
     url = Column(Text, nullable=False)
     auto_refresh = Column(Integer, default=3600)
-    tags = Column(JSON, default=[])
+    tags = Column(JSON, default=list)
     last_fetch = Column(DateTime)
     node_count = Column(Integer, default=0)
     status = Column(Integer, default=1)
     created_at = Column(DateTime, default=get_current_time)
     updated_at = Column(DateTime, default=get_current_time, onupdate=get_current_time)
-    nodes = relationship("Node", back_populates="subscription")
+    nodes = relationship("Node", back_populates="subscription", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Subscription(id={self.id}, name={self.name})>"
 
 class Node(Base):
     __tablename__ = "nodes"
     id = Column(Integer, primary_key=True, index=True)
-    subscription_id = Column(Integer, ForeignKey("subscriptions.id"))
+    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), index=True)
     name = Column(String(256))
     display_name = Column(String(256))
     node_type = Column(String(32))
@@ -86,26 +107,35 @@ class Node(Base):
     created_at = Column(DateTime, default=get_current_time)
     subscription = relationship("Subscription", back_populates="nodes")
 
+    def __repr__(self):
+        return f"<Node(id={self.id}, name={self.name}, type={self.node_type})>"
+
 class APIKey(Base):
     __tablename__ = "api_keys"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     name = Column(String(128))
     key = Column(String(64), unique=True, index=True)
     status = Column(Integer, default=1)
     created_at = Column(DateTime, default=get_current_time)
 
+    def __repr__(self):
+        return f"<APIKey(id={self.id}, name={self.name})>"
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)
+    user_id = Column(Integer, index=True)
     username = Column(String(64))
     action = Column(String(32))
     resource = Column(String(32))
     detail = Column(Text)
     ip = Column(String(64))
     success = Column(Integer, default=1)
-    created_at = Column(DateTime, default=get_current_time)
+    created_at = Column(DateTime, default=get_current_time, index=True)
+
+    def __repr__(self):
+        return f"<AuditLog(id={self.id}, action={self.action}, username={self.username})>"
 
 # ─── Create tables ────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
@@ -126,16 +156,16 @@ def migrate_database():
                 if 'download_speed' not in columns:
                     conn.execute(text("ALTER TABLE nodes ADD COLUMN download_speed DOUBLE PRECISION DEFAULT 0"))
                     conn.commit()
-                    print("Migration: Added nodes.download_speed column")
+                    logger.info("Migration: Added nodes.download_speed column")
 
                 if 'download_speed_type' not in columns:
                     conn.execute(text("ALTER TABLE nodes ADD COLUMN download_speed_type VARCHAR(20) DEFAULT ''"))
                     conn.commit()
-                    print("Migration: Added nodes.download_speed_type column")
+                    logger.info("Migration: Added nodes.download_speed_type column")
 
-        print("Database migration completed")
+        logger.info("Database migration completed")
     except Exception as e:
-        print(f"Migration warning: {e}")
+        logger.warning(f"Migration warning: {e}")
 
 migrate_database()
 
@@ -225,7 +255,7 @@ def seed_admin():
             )
             db.add(admin)
             db.commit()
-            print(f"Admin user created: {ADMIN_USERNAME}")
+            logger.info(f"Admin user created: {ADMIN_USERNAME}")
     finally:
         db.close()
 
@@ -234,9 +264,11 @@ seed_admin()
 # ─── App ──────────────────────────────────────────────────────────────────────
 app = FastAPI(title="SubForge API")
 
+# CORS 配置：允许所有来源（开发模式），生产环境应限制
+CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*').split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -260,9 +292,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     if not client_ip:
         client_ip = request.client.host if request.client else "unknown"
 
-    # Debug output
-    print(f"Client IP: {client_ip}")
-    print(f"Headers: {dict(request.headers)}")
+    logger.info(f"Login attempt from {client_ip} for user: {req.username}")
 
     user = db.query(User).filter(User.username == req.username, User.status == 1).first()
     if not user or not verify_password(req.password, user.password):
@@ -270,6 +300,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         audit = AuditLog(user_id=0, username=req.username, action="login", resource="auth", detail="login failed", ip=client_ip, success=0)
         db.add(audit)
         db.commit()
+        logger.warning(f"Failed login attempt for user: {req.username} from {client_ip}")
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token({"sub": user.id, "role": user.role})
@@ -278,6 +309,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     audit = AuditLog(user_id=user.id, username=user.username, action="login", resource="auth", detail="login success", ip=client_ip, success=1)
     db.add(audit)
     db.commit()
+    logger.info(f"Successful login for user: {req.username} from {client_ip}")
 
     return {
         "token": token,
@@ -509,8 +541,8 @@ def refresh_all_subscriptions(current_user: User = Depends(get_current_user), db
                 response = scraper.get(sub.url, timeout=60)
                 if response.status_code == 200:
                     content = response.text
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"cloudscraper failed for {sub.name}: {e}")
 
             if content is None:
                 for attempt in range(3):
@@ -519,8 +551,8 @@ def refresh_all_subscriptions(current_user: User = Depends(get_current_user), db
                         if response.status_code == 200:
                             content = response.text
                             break
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"httpx attempt {attempt + 1} failed for {sub.name}: {e}")
 
             if content is None:
                 results.append({"id": sub.id, "name": sub.name, "status": "failed", "node_count": 0})
@@ -529,7 +561,7 @@ def refresh_all_subscriptions(current_user: User = Depends(get_current_user), db
             # Parse nodes
             try:
                 decoded = base64.b64decode(content).decode('utf-8')
-            except:
+            except Exception:
                 decoded = content
 
             # Check format
@@ -612,28 +644,28 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
         # Method 1: Try cloudscraper first (bypasses Cloudflare)
         try:
             import cloudscraper
-            print("Attempting cloudscraper...")
+            logger.info("Attempting cloudscraper...")
             scraper = cloudscraper.create_scraper()
             response = scraper.get(sub.url, timeout=60)
-            print(f"cloudscraper status: {response.status_code}")
+            logger.info(f"cloudscraper status: {response.status_code}")
             if response.status_code == 200:
                 content = response.text
-                print(f"cloudscraper: Got content ({len(content)} bytes)")
+                logger.info(f"cloudscraper: Got content ({len(content)} bytes)")
         except Exception as e:
-            print(f"cloudscraper failed: {e}")
+            logger.warning(f"cloudscraper failed: {e}")
 
         # Method 2: Fallback to httpx
         if content is None:
-            print("Falling back to httpx...")
+            logger.info("Falling back to httpx...")
             for attempt in range(3):
                 try:
                     response = httpx.get(sub.url, timeout=60, follow_redirects=True)
-                    print(f"httpx attempt {attempt + 1}: HTTP {response.status_code}")
+                    logger.info(f"httpx attempt {attempt + 1}: HTTP {response.status_code}")
                     if response.status_code == 200:
                         content = response.text
                         break
                 except Exception as e:
-                    print(f"httpx attempt {attempt + 1}: {e}")
+                    logger.info(f"httpx attempt {attempt + 1}: {e}")
                     if attempt < 2:
                         import time
                         time.sleep(2)
@@ -641,12 +673,12 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
         if content is None:
             raise Exception("Failed to fetch subscription after 3 attempts")
 
-        print(f"Fetched content length: {len(content)}")
+        logger.info(f"Fetched content length: {len(content)}")
 
         # Try to decode base64
         try:
             decoded = base64.b64decode(content).decode('utf-8')
-        except:
+        except Exception:
             decoded = content
 
         # Parse nodes from decoded content
@@ -657,10 +689,10 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
         is_clash_yaml = False
         if 'proxies:' in content or 'proxy-providers:' in content:
             is_clash_yaml = True
-            print("Detected Clash YAML format in original content")
+            logger.info("Detected Clash YAML format in original content")
         elif 'proxies:' in decoded or 'proxy-providers:' in decoded:
             is_clash_yaml = True
-            print("Detected Clash YAML format in decoded content")
+            logger.info("Detected Clash YAML format in decoded content")
 
         if is_clash_yaml:
             nodes = parse_clash_yaml(content)
@@ -692,7 +724,7 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
                     if node:
                         nodes.append(node)
 
-        print(f"Parsed {len(nodes)} nodes from {len(lines)} lines")
+        logger.info(f"Parsed {len(nodes)} nodes from {len(lines)} lines")
 
         # Delete old nodes
         db.query(Node).filter(Node.subscription_id == sub.id).delete()
@@ -741,7 +773,7 @@ def parse_vless(line: str) -> dict:
                 'uuid': uuid,
                 'params': params
             }
-    except:
+    except Exception:
         pass
     return None
 
@@ -768,9 +800,9 @@ def parse_vmess(line: str) -> dict:
                 'data': data
             }
         else:
-            print(f"vmess regex failed for: {line[:50]}")
+            logger.warning(f"vmess regex failed for: {line[:50]}")
     except Exception as e:
-        print(f"vmess parse error: {e}")
+        logger.warning(f"vmess parse error: {e}")
     return None
 
 def parse_trojan(line: str) -> dict:
@@ -792,7 +824,7 @@ def parse_trojan(line: str) -> dict:
                 'password': password,
                 'params': params
             }
-    except:
+    except Exception:
         pass
     return None
 
@@ -814,7 +846,7 @@ def parse_ss(line: str) -> dict:
                 else:
                     cipher = 'aes-256-gcm'
                     password = decoded
-            except:
+            except Exception:
                 cipher = 'aes-256-gcm'
                 password = encoded
 
@@ -829,9 +861,9 @@ def parse_ss(line: str) -> dict:
                 'cipher': cipher
             }
         else:
-            print(f"ss regex failed for: {line[:50]}")
+            logger.warning(f"ss regex failed for: {line[:50]}")
     except Exception as e:
-        print(f"ss parse error: {e}")
+        logger.warning(f"ss parse error: {e}")
     return None
 
 def parse_hysteria2(line: str) -> dict:
@@ -853,7 +885,7 @@ def parse_hysteria2(line: str) -> dict:
                 'auth': auth,
                 'params': params
             }
-    except:
+    except Exception:
         pass
     return None
 
@@ -915,7 +947,7 @@ def parse_clash_yaml(content: str) -> list:
             for provider_name, provider in data['proxy-providers'].items():
                 provider_url = provider.get('url', '')
                 if provider_url:
-                    print(f"Fetching proxy-provider: {provider_name} from {provider_url}")
+                    logger.info(f"Fetching proxy-provider: {provider_name} from {provider_url}")
                     try:
                         provider_response = httpx.get(provider_url, timeout=30, follow_redirects=True)
                         if provider_response.status_code == 200:
@@ -941,10 +973,10 @@ def parse_clash_yaml(content: str) -> list:
                                     }
                                     nodes.append(node)
                     except Exception as e:
-                        print(f"Failed to fetch provider {provider_name}: {e}")
+                        logger.warning(f"Failed to fetch provider {provider_name}: {e}")
 
     except Exception as e:
-        print(f"Clash YAML parse error: {e}")
+        logger.error(f"Clash YAML parse error: {e}")
 
     return nodes
 
@@ -1037,7 +1069,7 @@ def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_curren
                     )
                     db.add(node)
                     imported += 1
-        except:
+        except Exception:
             continue
 
     # Commit all nodes first
@@ -1085,7 +1117,7 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
                     result = sock.connect_ex((node.server, port))
                     sock.close()
                     return result == 0
-                except:
+                except Exception:
                     return False
 
             # Test common ports
@@ -1099,7 +1131,7 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
                         if future.result():
                             is_online = True
                             break
-                    except:
+                    except Exception:
                         pass
 
             # Fallback: DNS resolution
@@ -1107,7 +1139,7 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
                 try:
                     socket.gethostbyname(node.server)
                     is_online = True
-                except:
+                except Exception:
                     pass
 
             if is_online:
@@ -1152,7 +1184,7 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
                     if result == 0:
                         return int((end_time - start_time) * 1000)
                     return None
-                except:
+                except Exception:
                     return None
 
             # Try multiple ports in parallel
@@ -1166,7 +1198,7 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
                         result = future.result()
                         if result is not None and latency is None:
                             latency = result
-                    except:
+                    except Exception:
                         pass
 
             if latency is not None:
@@ -1189,7 +1221,7 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
                         "latency": 999,
                         "status": "success"
                     })
-                except:
+                except Exception:
                     node.latency = -1
                     results.append({
                         "id": node.id,
@@ -1239,7 +1271,7 @@ def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Sess
                     if result == 0:
                         return int((end_time - start_time) * 1000)
                     return None
-                except:
+                except Exception:
                     return None
 
             test_ports = [node.port, 80, 443, 8080, 8443]
@@ -1252,7 +1284,7 @@ def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Sess
                         result = future.result()
                         if result is not None and latency is None:
                             latency = result
-                    except:
+                    except Exception:
                         pass
 
             if latency is not None:
@@ -1273,7 +1305,7 @@ def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Sess
                         "latency": 999,
                         "status": "success"
                     })
-                except:
+                except Exception:
                     node.latency = -1
                     results.append({
                         "id": node.id,
@@ -1303,7 +1335,7 @@ def convert(req: ConvertRequest):
         try:
             decoded = base64.b64decode(req.source).decode()
             return {"result": decoded, "format": "detected"}
-        except:
+        except Exception:
             return {"result": req.source, "format": "raw"}
     return {"result": "No source provided", "format": "error"}
 
@@ -1416,7 +1448,7 @@ def generate_clash_yaml(nodes: list) -> str:
         if node.config_json:
             try:
                 config_data = json.loads(node.config_json) if isinstance(node.config_json, str) else node.config_json
-            except:
+            except Exception:
                 config_data = {}
         else:
             config_data = {}
@@ -1758,7 +1790,7 @@ def generate_base64_subscription(nodes: list) -> str:
     return base64.b64encode(content.encode()).decode()
 
 @app.get("/api/metrics")
-def get_metrics(db: Session = Depends(get_db)):
+def get_metrics(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
     import time
     import os
 
@@ -1775,7 +1807,7 @@ def get_metrics(db: Session = Depends(get_db)):
                     memory_kb = int(line.split()[1])
                     process_memory_mb = memory_kb / 1024
                     break
-    except:
+    except Exception:
         pass
 
     # Get system memory
@@ -1787,7 +1819,7 @@ def get_metrics(db: Session = Depends(get_db)):
                     memory_kb = int(line.split()[1])
                     system_memory_mb = memory_kb / 1024
                     break
-    except:
+    except Exception:
         pass
 
     # Calculate uptime
@@ -1823,7 +1855,7 @@ def get_version():
     try:
         with open('/app/VERSION', 'r') as f:
             version = f.read().strip()
-    except:
+    except Exception:
         version = "1.0.0"
 
     return {
@@ -1840,14 +1872,14 @@ def get_update_version():
     try:
         with open('/app/VERSION', 'r') as f:
             current_version = f.read().strip()
-    except:
+    except Exception:
         current_version = "1.0.0"
 
     # Read commit hash from COMMIT file
     try:
         with open('/app/COMMIT', 'r') as f:
             current_commit = f.read().strip()
-    except:
+    except Exception:
         current_commit = ""
 
     return {
@@ -1869,7 +1901,7 @@ def get_releases():
     try:
         with open('/app/VERSION', 'r') as f:
             current_version = f.read().strip()
-    except:
+    except Exception:
         current_version = "1.0.0"
 
     return [
