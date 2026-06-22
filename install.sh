@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+# 确保 VERSION 变量已定义
+VERSION="${VERSION:-1.2.4}"
+
 # Support piped execution (curl | bash)
 if [ ! -t 0 ] && [ -e /dev/tty ]; then
     exec < /dev/tty
@@ -898,7 +901,7 @@ main() {
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
     echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本 v${VERSION}${NC}"
+    echo -e "  ${BOLD}一键安装脚本 v${VERSION:-unknown}${NC}"
     echo ""
 
     check_root
