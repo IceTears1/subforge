@@ -406,9 +406,9 @@ async function viewToken(sub: Subscription) {
   tokenFormat.value = 'clash'
   // Use token directly from subscription object
   if (sub.token) {
-    tokenUrl.value = `${window.location.origin}/sub/${sub.token}?target=clash`
+    tokenUrl.value = `${window.location.origin}/sub/${sub.token}/export?target=clash`
   } else {
-    tokenUrl.value = `${window.location.origin}/sub/loading?target=clash`
+    tokenUrl.value = `${window.location.origin}/sub/loading/export?target=clash`
   }
   showToken.value = true
 }
