@@ -2,6 +2,7 @@
 # SubForge One-Click Installer v1.2.4
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 #    or: sudo bash install.sh
+#    or: sudo bash install.sh -v 1.2.4  (指定版本安装)
 
 set -euo pipefail
 
@@ -20,7 +21,15 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.2.4"
+INSTALL_VERSION=""
+
+# Parse command line arguments
+while getopts "v:" opt; do
+    case $opt in
+        v) INSTALL_VERSION="$OPTARG" ;;
+        *) echo "用法: $0 [-v 版本号]"; exit 1 ;;
+    esac
+done
 
 # Default ports (configurable via interactive prompts)
 FRONTEND_PORT=3001
@@ -100,23 +109,45 @@ clone_repo() {
     info "下载代码..."
     IS_UPGRADE=false
 
+    # Determine which version/tag to use
+    if [ -n "$INSTALL_VERSION" ]; then
+        TARGET_TAG="v${INSTALL_VERSION#v}"  # Ensure v prefix
+        info "指定安装版本: $TARGET_TAG"
+    else
+        TARGET_TAG="main"
+    fi
+
     if [ -d "$INSTALL_DIR/.git" ]; then
         cd "$INSTALL_DIR"
         OLD=$(cat VERSION 2>/dev/null || echo "unknown")
-        git fetch origin main 2>/dev/null
-        git reset --hard origin/main 2>/dev/null
+        git fetch --tags 2>/dev/null || true
+
+        if [ -n "$INSTALL_VERSION" ]; then
+            # Checkout specific version
+            git checkout "$TARGET_TAG" 2>/dev/null || error "版本 $TARGET_TAG 不存在"
+            log "已切换到版本: $TARGET_TAG"
+        else
+            # Pull latest from main
+            git fetch origin main 2>/dev/null
+            git reset --hard origin/main 2>/dev/null
+        fi
+
         NEW=$(cat VERSION 2>/dev/null || echo "unknown")
         if [ "$OLD" != "$NEW" ]; then
             IS_UPGRADE=true
-            log "检测到新版本: $OLD → $NEW"
+            log "版本更新: $OLD → $NEW"
         else
-            log "已是最新版本"
+            log "已是版本: $NEW"
         fi
     else
         rm -rf "$INSTALL_DIR"
-        git clone "$REPO" "$INSTALL_DIR"
+        if [ -n "$INSTALL_VERSION" ]; then
+            git clone --branch "$TARGET_TAG" "$REPO" "$INSTALL_DIR" || error "克隆版本 $TARGET_TAG 失败"
+        else
+            git clone "$REPO" "$INSTALL_DIR"
+        fi
         cd "$INSTALL_DIR"
-        log "代码已克隆"
+        log "代码已克隆 ($(cat VERSION 2>/dev/null || echo 'unknown'))"
     fi
 }
 
