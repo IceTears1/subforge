@@ -908,11 +908,27 @@ main() {
     echo -e "    密  码: ${CYAN}${ADMIN_PASSWORD}${NC}"
     echo ""
     echo -e "  ${BOLD}订阅格式:${NC}"
+    echo -e "    ${DIM}登录后在订阅列表中获取 token，然后替换下方 {token}${NC}"
+    echo ""
+
+    # ClashMeta 订阅
+    echo -e "    ${GREEN}${BOLD}---------- ClashMeta 订阅 ----------${NC}"
+    if [ -n "$DOMAIN" ]; then
+        echo -e "    ${CYAN}https://${DOMAIN}:${SSL_PORT}/sub/{token}/export?target=clash${NC}"
+        echo -e "    ${DIM}在线二维码:${NC}"
+        echo -e "    ${DIM}https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=https://${DOMAIN}:${SSL_PORT}/sub/{token}/export?target=clash${NC}"
+    fi
+    echo -e "    ${CYAN}http://${PUBLIC_IP}:${FRONTEND_PORT}/sub/{token}/export?target=clash${NC}"
+    echo ""
+
+    # 默认订阅 (base64)
+    echo -e "    ${GREEN}${BOLD}---------- 默认订阅 (base64) ----------${NC}"
     if [ -n "$DOMAIN" ]; then
         echo -e "    ${CYAN}https://${DOMAIN}:${SSL_PORT}/sub/{token}/export?target=base64${NC}"
+        echo -e "    ${DIM}在线二维码:${NC}"
+        echo -e "    ${DIM}https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=https://${DOMAIN}:${SSL_PORT}/sub/{token}/export?target=base64${NC}"
     fi
     echo -e "    ${CYAN}http://${PUBLIC_IP}:${FRONTEND_PORT}/sub/{token}/export?target=base64${NC}"
-    echo -e "    ${DIM}登录后在订阅列表中获取 token${NC}"
     echo ""
     echo -e "  ${BOLD}快捷管理:${NC}"
     echo -e "    ${CYAN}subforge${NC}  ${DIM}# 输入此命令打开交互式管理菜单${NC}"
