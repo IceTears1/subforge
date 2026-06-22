@@ -1655,6 +1655,7 @@ def generate_base64_subscription(nodes: list) -> str:
     """Generate base64 encoded subscription for Shadowrocket/V2Ray"""
     import base64
     import json
+    from urllib.parse import unquote, urlparse, parse_qs
 
     lines = []
     for node in nodes:
@@ -1666,22 +1667,31 @@ def generate_base64_subscription(nodes: list) -> str:
             if node.node_type == "vless":
                 # vless://uuid@server:port?params#name
                 uuid = config.get("id", config.get("uuid", ""))
-                params = []
-                if config.get("tls") == "tls":
-                    params.append("security=tls")
-                    if config.get("sni"):
-                        params.append(f"sni={config['sni']}")
-                if config.get("net"):
-                    params.append(f"type={config['net']}")
-                if config.get("path"):
-                    params.append(f"path={config['path']}")
-                if config.get("host"):
-                    params.append(f"host={config['host']}")
-                if config.get("fp"):
-                    params.append(f"fp={config['fp']}")
-                if config.get("flow"):
-                    params.append(f"flow={config['flow']}")
-                query = "&".join(params)
+
+                # Check if we have raw params string (from parsed subscription)
+                raw_params = config.get("params", "")
+                if raw_params:
+                    # Use the raw params string directly
+                    query = raw_params
+                else:
+                    # Build params from individual fields
+                    params = []
+                    if config.get("tls") == "tls":
+                        params.append("security=tls")
+                        if config.get("sni"):
+                            params.append(f"sni={config['sni']}")
+                    if config.get("net"):
+                        params.append(f"type={config['net']}")
+                    if config.get("path"):
+                        params.append(f"path={config['path']}")
+                    if config.get("host"):
+                        params.append(f"host={config['host']}")
+                    if config.get("fp"):
+                        params.append(f"fp={config['fp']}")
+                    if config.get("flow"):
+                        params.append(f"flow={config['flow']}")
+                    query = "&".join(params)
+
                 name = config.get("ps", node.name or node.display_name or "Unknown")
                 lines.append(f"vless://{uuid}@{node.server}:{node.port}?{query}#{name}")
 
@@ -1709,12 +1719,21 @@ def generate_base64_subscription(nodes: list) -> str:
             elif node.node_type == "trojan":
                 # trojan://password@server:port?params#name
                 password = config.get("password", "")
-                params = []
-                if config.get("sni"):
-                    params.append(f"sni={config['sni']}")
-                if config.get("peer"):
-                    params.append(f"peer={config['peer']}")
-                query = "&".join(params)
+
+                # Check if we have raw params string (from parsed subscription)
+                raw_params = config.get("params", "")
+                if raw_params:
+                    # Use the raw params string directly
+                    query = raw_params
+                else:
+                    # Build params from individual fields
+                    params = []
+                    if config.get("sni"):
+                        params.append(f"sni={config['sni']}")
+                    if config.get("peer"):
+                        params.append(f"peer={config['peer']}")
+                    query = "&".join(params)
+
                 name = config.get("ps", node.name or node.display_name or "Unknown")
                 lines.append(f"trojan://{password}@{node.server}:{node.port}?{query}#{name}")
 
