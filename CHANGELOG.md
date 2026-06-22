@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.1 (2026-06-22)
+
+### Features
+- **Shadowrocket 支持** — 添加 Shadowrocket 配置导出（base64 编码的 URI 列表）
+
 ## v1.4.0 (2026-06-22)
 
 ### Features
