@@ -373,8 +373,31 @@ async def log_requests(request: Request, call_next):
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/api/health")
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    """健康检查端点"""
+    checks = {
+        "status": "ok",
+        "version": "unknown",
+        "timestamp": get_current_time().isoformat(),
+    }
+
+    # 检查版本
+    try:
+        with open('/app/VERSION', 'r') as f:
+            checks["version"] = f.read().strip()
+    except Exception:
+        pass
+
+    # 检查数据库连接
+    try:
+        db.execute("SELECT 1")
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = "error"
+        checks["status"] = "degraded"
+        logger.warning(f"Health check: database error: {e}")
+
+    return checks
 
 @app.post("/api/auth/login")
 @limiter.limit("5/minute")
