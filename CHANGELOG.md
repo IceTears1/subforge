@@ -5,6 +5,16 @@
 ### Features
 - **前端格式支持** — 更新前端 UI 支持所有新增输出格式
 - **修复 QX 格式** — 修正 Quantumult X 的 target 参数为 `qx`
+- **在线更新功能** — 支持从 Web UI 检查更新、更新到最新版本、版本回滚
+- **GitHub 版本检查** — 自动从 GitHub 获取最新版本信息
+- **一键打包脚本** — 添加 scripts/build.sh 自动构建和发布
+
+### API 更新
+- `GET /api/update/version` — 获取版本信息（检查 GitHub 更新）
+- `GET /api/update/releases` — 获取所有发布版本
+- `POST /api/update/latest` — 更新到最新版本
+- `POST /api/update/tag` — 更新到指定版本
+- `POST /api/update/rollback` — 回滚到指定版本
 
 ## v1.4.1 (2026-06-22)
 
