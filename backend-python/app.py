@@ -42,11 +42,25 @@ from exporters import (
 from pipeline import SubscriptionPipeline
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# 结构化日志辅助函数
+def log_request(method: str, path: str, status_code: int, duration: float = 0):
+    """记录请求日志"""
+    logger.info(f"{method} {path} {status_code} {duration:.3f}s")
+
+def log_error(error: str, context: dict = None):
+    """记录错误日志"""
+    if context:
+        logger.error(f"{error} | {json.dumps(context, ensure_ascii=False)}")
+    else:
+        logger.error(error)
 
 # 东八区 (UTC+8)
 CST = timezone(timedelta(hours=8))
@@ -337,6 +351,24 @@ async def limit_request_size(request: Request, call_next):
                 content={"detail": "Request body too large"}
             )
     response = await call_next(request)
+    return response
+
+# 请求日志
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+
+    # 记录非健康检查请求
+    if request.url.path != "/api/health":
+        log_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration=duration
+        )
+
     return response
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
