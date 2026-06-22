@@ -345,9 +345,17 @@ interactive_config() {
 load_images() {
     info "加载预构建镜像..."
 
-    if [ -f "$INSTALL_DIR/images/subforge-backend.tar.gz" ]; then
-        docker load < "$INSTALL_DIR/images/subforge-backend.tar.gz"
-        log "后端镜像已加载"
+    # 优先加载最新版本镜像，回退到无版本号镜像
+    local backend_image=""
+    if ls "$INSTALL_DIR/images/subforge-backend-v"*.tar.gz 1> /dev/null 2>&1; then
+        backend_image=$(ls -t "$INSTALL_DIR/images/subforge-backend-v"*.tar.gz | head -1)
+    elif [ -f "$INSTALL_DIR/images/subforge-backend.tar.gz" ]; then
+        backend_image="$INSTALL_DIR/images/subforge-backend.tar.gz"
+    fi
+
+    if [ -n "$backend_image" ]; then
+        docker load < "$backend_image"
+        log "后端镜像已加载: $(basename "$backend_image")"
     else
         warn "后端镜像不存在，将使用本地构建"
     fi
