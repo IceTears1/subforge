@@ -4,7 +4,8 @@ export const formatOptions = [
   { label: 'sing-box', value: 'singbox' },
   { label: 'Surge', value: 'surge' },
   { label: 'Loon', value: 'loon' },
-  { label: 'QX', value: 'quanx' },
+  { label: 'QX', value: 'qx' },
+  { label: 'Shadowrocket', value: 'shadowrocket' },
   { label: 'Base64', value: 'base64' },
 ]
 
@@ -15,7 +16,8 @@ export function getFormatColor(format: string): string {
     singbox: '#3b82f6',
     surge: '#f59e0b',
     loon: '#8b5cf6',
-    quanx: '#ec4899',
+    qx: '#ec4899',
+    shadowrocket: '#ff6b6b',
     base64: '#6b7280',
   }
   return colors[format] || colors.base64

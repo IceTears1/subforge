@@ -194,7 +194,8 @@ const formatOptions = [
   { label: 'sing-box', value: 'singbox' },
   { label: 'Surge', value: 'surge' },
   { label: 'Loon', value: 'loon' },
-  { label: 'QX', value: 'quanx' },
+  { label: 'QX', value: 'qx' },
+  { label: 'Shadowrocket', value: 'shadowrocket' },
   { label: 'Base64', value: 'base64' },
 ]
 
