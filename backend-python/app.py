@@ -1373,16 +1373,10 @@ def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Sess
 
     db.commit()
     return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
-            results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
-
-    # Save latency to database
-    db.commit()
-
-    return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
 
 @app.get("/api/formats")
 def list_formats():
-    return {"formats": ["clash", "singbox", "surge", "loon", "quanx", "base64"]}
+    return {"formats": ["clash", "singbox", "surge", "loon", "qx", "shadowrocket", "base64"]}
 
 @app.post("/api/convert")
 def convert(req: ConvertRequest):
