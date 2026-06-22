@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.8 (2026-06-22)
+
+### Features
+- **指定版本安装** — 支持从 GitHub Releases 下载指定版本的预构建镜像
+- **优化安装速度** — 使用 sparse-checkout 跳过 images 目录，从 Releases 下载镜像
+
+### Bug Fixes
+- **修复安装脚本变量未定义错误** — 使用 \${VAR:-} 语法避免 set -u 报错
+- **优化镜像管理** — 本地只保留最新版本镜像
+
 ## v1.2.7 (2026-06-22)
 
 ### Bug Fixes

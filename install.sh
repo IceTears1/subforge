@@ -1,13 +1,10 @@
 #!/bin/bash
-# SubForge One-Click Installer v1.2.4
+# SubForge One-Click Installer v1.2.8
 # Usage: curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
 #    or: sudo bash install.sh
-#    or: sudo bash install.sh -v 1.2.4  (指定版本安装)
+#    or: sudo bash install.sh -v 1.2.8  (指定版本安装)
 
 set -euo pipefail
-
-# 确保 VERSION 变量已定义
-VERSION="${VERSION:-1.2.7}"
 
 # Support piped execution (curl | bash)
 if [ ! -t 0 ] && [ -e /dev/tty ]; then
@@ -24,8 +21,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.2.7"  # 安装脚本版本
-INSTALL_VERSION=""  # 用户指定安装的版本
+INSTALL_VERSION=""
 
 # Parse command line arguments
 while getopts "v:" opt; do
@@ -145,16 +141,157 @@ clone_repo() {
         fi
     else
         rm -rf "$INSTALL_DIR"
-        # 使用浅克隆
+        # 浅克隆，跳过 images 目录（从 Releases 下载）
         info "下载代码..."
         if [ -n "$INSTALL_VERSION" ]; then
-            git clone --depth 1 --branch "$TARGET_TAG" "$REPO" "$INSTALL_DIR" || error "克隆版本 $TARGET_TAG 失败"
+            git clone --depth 1 --branch "$TARGET_TAG" --sparse "$REPO" "$INSTALL_DIR" || error "克隆版本 $TARGET_TAG 失败"
         else
-            git clone --depth 1 "$REPO" "$INSTALL_DIR"
+            git clone --depth 1 --sparse "$REPO" "$INSTALL_DIR"
         fi
         cd "$INSTALL_DIR"
+        # Sparse checkout: 只需要代码，不需要 images 目录
+        git sparse-checkout init --cone 2>/dev/null || true
+        git sparse-checkout set backend-python frontend nginx scripts docs proxy 2>/dev/null || true
         log "代码已克隆 ($(cat VERSION 2>/dev/null || echo 'unknown'))"
     fi
+}
+
+download_images() {
+    info "下载预构建镜像..."
+    mkdir -p images
+
+    # Determine version for image download
+    local img_version=""
+    if [ -n "$INSTALL_VERSION" ]; then
+        img_version="v${INSTALL_VERSION#v}"
+    else
+        img_version="v$(cat VERSION 2>/dev/null || echo 'latest')"
+    fi
+
+    # Check if images already exist
+    local backend_img="images/subforge-backend-${img_version}.tar.gz"
+    local frontend_img="images/subforge-frontend-${img_version}.tar.gz"
+
+    if [ -f "$backend_img" ] && [ -f "$frontend_img" ]; then
+        log "镜像已存在: $img_version"
+        return
+    fi
+
+    # Try to download from GitHub Releases
+    local release_url="https://github.com/IceTears1/subforge/releases/download/${img_version}"
+
+    if [ ! -f "$backend_img" ]; then
+        info "下载后端镜像..."
+        if curl -fsSL "${release_url}/subforge-backend-${img_version}.tar.gz" -o "$backend_img" 2>/dev/null; then
+            log "后端镜像下载完成"
+        else
+            warn "后端镜像下载失败，将使用本地构建"
+            rm -f "$backend_img"
+        fi
+    fi
+
+    if [ ! -f "$frontend_img" ]; then
+        info "下载前端镜像..."
+        if curl -fsSL "${release_url}/subforge-frontend-${img_version}.tar.gz" -o "$frontend_img" 2>/dev/null; then
+            log "前端镜像下载完成"
+        else
+            warn "前端镜像下载失败，将使用本地构建"
+            rm -f "$frontend_img"
+        fi
+    fi
+}
+
+load_images() {
+    info "加载预构建镜像..."
+
+    # 优先加载最新版本镜像，回退到无版本号镜像
+    local backend_image=""
+    if ls images/subforge-backend-v*.tar.gz 1> /dev/null 2>&1; then
+        backend_image=$(ls -t images/subforge-backend-v*.tar.gz | head -1)
+    elif [ -f "images/subforge-backend.tar.gz" ]; then
+        backend_image="images/subforge-backend.tar.gz"
+    fi
+
+    if [ -n "$backend_image" ]; then
+        docker load < "$backend_image"
+        log "后端镜像已加载: $(basename "$backend_image")"
+    else
+        warn "后端镜像不存在，将使用本地构建"
+    fi
+
+    local frontend_image=""
+    if ls images/subforge-frontend-v*.tar.gz 1> /dev/null 2>&1; then
+        frontend_image=$(ls -t images/subforge-frontend-v*.tar.gz | head -1)
+    elif [ -f "images/subforge-frontend.tar.gz" ]; then
+        frontend_image="images/subforge-frontend.tar.gz"
+    fi
+
+    if [ -n "$frontend_image" ]; then
+        docker load < "$frontend_image"
+        log "前端镜像已加载: $(basename "$frontend_image")"
+    else
+        warn "前端镜像不存在，将使用本地构建"
+    fi
+}
+
+generate_config() {
+    info "生成配置..."
+    cd "$INSTALL_DIR"
+
+    if [ "$USE_EXISTING_DATA" = true ]; then
+        # Use existing config
+        source .env 2>/dev/null || true
+    else
+        # Generate new config
+        [ -z "${DB_PASSWORD:-}" ] && DB_PASSWORD=$(gen_pass 24)
+        [ -z "${JWT_SECRET:-}" ] && JWT_SECRET=$(gen_pass 32)
+        [ -z "${ADMIN_PASSWORD:-}" ] && ADMIN_PASSWORD=$(gen_pass 16)
+
+        cat > .env <<EOF
+# 端口配置
+FRONTEND_PORT=${FRONTEND_PORT}
+BACKEND_PORT=${BACKEND_PORT}
+DB_PORT=${DB_PORT}
+SSL_PORT=${SSL_PORT}
+
+# 域名/SSL
+DOMAIN=${DOMAIN:-}
+
+# 数据库
+DB_NAME=subforge
+DB_USER=subforge
+DB_PASSWORD=${DB_PASSWORD}
+DB_SSL_MODE=disable
+
+# JWT
+JWT_SECRET=${JWT_SECRET}
+JWT_EXPIRY=24h
+
+# 管理员
+ADMIN_USERNAME=${ADMIN_USERNAME}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+
+# 其他
+CORS_ORIGINS=
+ADMIN_IP_WHITELIST=
+GIN_MODE=release
+EOF
+    fi
+
+    log "配置已生成"
+}
+
+build_frontend() {
+    if docker image inspect subforge-frontend:latest >/dev/null 2>&1; then
+        log "前端镜像已存在"
+        return
+    fi
+
+    info "构建前端镜像..."
+    cd "$INSTALL_DIR/frontend"
+    docker build -t subforge-frontend:latest .
+    cd "$INSTALL_DIR"
+    log "前端镜像构建完成"
 }
 
 check_existing_install() {
@@ -284,60 +421,43 @@ interactive_config() {
     fi
     if [ "$FRONTEND_PORT" = "$SSL_PORT" ]; then
         warn "端口冲突！前端端口不能与 HTTPS 端口相同"
-        warn "已自动修正: SSL_PORT=3003"
-        SSL_PORT=3003
+        warn "已自动修正: FRONTEND_PORT=3001"
+        FRONTEND_PORT=3001
     fi
 
-    # Admin username
-    echo -e "${YELLOW}管理员账户 [${ADMIN_USERNAME}]${NC}"
+    echo ""
+
+    # Admin credentials
+    echo -e "${DIM}--- 管理员账户 ---${NC}"
+    echo -e "${YELLOW}管理员用户名 [${ADMIN_USERNAME}]${NC}"
     read -p "> " input
     ADMIN_USERNAME="${input:-$ADMIN_USERNAME}"
 
-    # Admin password
-    echo -e "${YELLOW}管理员密码 随机生成${NC}"
+    echo -e "${YELLOW}管理员密码 (留空随机生成)${NC}"
     read -p "> " input
-    ADMIN_PASSWORD="${input:-$(gen_pass 16)}"
+    ADMIN_PASSWORD="${input:-$ADMIN_PASSWORD}"
 
-    # Domain configuration
     echo ""
-    echo -e "${DIM}--- 域名/SSL 配置 留空跳过 ---${NC}"
 
-    # Domain
-    if [ -n "$DOMAIN" ]; then
-        echo -e "${YELLOW}域名 [${DOMAIN}]${NC}"
-    else
-        echo -e "${YELLOW}域名 例: example.com${NC}"
-    fi
+    # Domain/SSL
+    echo -e "${DIM}--- 域名/SSL 配置 (留空跳过) ---${NC}"
+    echo -e "${YELLOW}域名 例: example.com${NC}"
     read -p "> " input
     DOMAIN="${input:-$DOMAIN}"
 
     if [ -n "$DOMAIN" ]; then
-        # SSL provider selection
-        echo ""
         echo -e "${YELLOW}SSL 证书来源:${NC}"
-        echo -e "  1) Let's Encrypt (免费)"
-        echo -e "  2) 阿里云 SSL 证书"
-        echo -e "  3) 跳过 SSL 配置"
+        echo "  1) Let's Encrypt (免费)"
+        echo "  2) 阿里云 SSL 证书"
+        echo "  3) 跳过 SSL 配置"
         read -p "> " ssl_choice
-        SSL_PROVIDER="${ssl_choice:-1}"
+        SSL_PROVIDER="${ssl_choice:-3}"
 
         if [ "$SSL_PROVIDER" = "2" ]; then
-            # Alibaba Cloud SSL
-            if [ -n "$ALI_AK" ]; then
-                echo -e "${YELLOW}阿里云 AccessKey ID [${ALI_AK:0:8}****]${NC}"
-            else
-                echo -e "${YELLOW}阿里云 AccessKey ID${NC}"
-            fi
+            echo -e "${YELLOW}阿里云 AccessKey ID${NC}"
             read -p "> " input
             ALI_AK="${input:-$ALI_AK}"
-
-            if [ -n "$ALI_SK" ]; then
-                echo -e "${YELLOW}阿里云 AccessKey Secret [${ALI_SK:0:4}****]${NC}"
-            else
-                echo -e "${YELLOW}阿里云 AccessKey Secret${NC}"
-            fi
-            read -p "> " input
-            ALI_SK="${input:-$ALI_SK}"
+            echo -e "${YELLOW}阿里云 AccessKey Secret${NC}"
         else
             # Let's Encrypt
             if [ -n "$EMAIL" ]; then
@@ -360,7 +480,7 @@ interactive_config() {
     echo -e "  数据库端口:   ${CYAN}${DB_PORT}${NC}"
     echo -e "  HTTPS 端口:   ${CYAN}${SSL_PORT}${NC}"
     echo -e "  管理员账户:   ${CYAN}${ADMIN_USERNAME}${NC}"
-    echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD}${NC}"
+    echo -e "  管理员密码:   ${CYAN}${ADMIN_PASSWORD:-随机生成}${NC}"
     if [ -n "$DOMAIN" ]; then
         echo -e "  域名:         ${CYAN}${DOMAIN}${NC}"
         case "${SSL_PROVIDER:-}" in
@@ -379,93 +499,16 @@ interactive_config() {
     fi
 }
 
-load_images() {
-    info "加载预构建镜像..."
+ensure_nginx_config() {
+    info "检查 Nginx 配置..."
 
-    # 优先加载最新版本镜像，回退到无版本号镜像
-    local backend_image=""
-    if ls "$INSTALL_DIR/images/subforge-backend-v"*.tar.gz 1> /dev/null 2>&1; then
-        backend_image=$(ls -t "$INSTALL_DIR/images/subforge-backend-v"*.tar.gz | head -1)
-    elif [ -f "$INSTALL_DIR/images/subforge-backend.tar.gz" ]; then
-        backend_image="$INSTALL_DIR/images/subforge-backend.tar.gz"
+    # Create nginx directory if not exists
+    mkdir -p "$INSTALL_DIR/nginx"
+
+    # Check if nginx config template exists
+    if [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf.template" ]; then
+        warn "Nginx 配置模板不存在，将使用默认配置"
     fi
-
-    if [ -n "$backend_image" ]; then
-        docker load < "$backend_image"
-        log "后端镜像已加载: $(basename "$backend_image")"
-    else
-        warn "后端镜像不存在，将使用本地构建"
-    fi
-
-    if [ -f "$INSTALL_DIR/images/subforge-frontend.tar.gz" ]; then
-        docker load < "$INSTALL_DIR/images/subforge-frontend.tar.gz"
-        log "前端镜像已加载"
-    else
-        warn "前端镜像不存在，将使用本地构建"
-    fi
-}
-
-generate_config() {
-    info "生成配置..."
-    cd "$INSTALL_DIR"
-
-    if [ "$USE_EXISTING_DATA" = true ]; then
-        # Use existing config
-        source .env 2>/dev/null || true
-    else
-        # Generate new config
-        [ -z "${DB_PASSWORD:-}" ] && DB_PASSWORD=$(gen_pass 24)
-        [ -z "${JWT_SECRET:-}" ] && JWT_SECRET=$(gen_pass 32)
-        [ -z "${ADMIN_PASSWORD:-}" ] && ADMIN_PASSWORD=$(gen_pass 16)
-
-        cat > .env <<EOF
-# 端口配置
-FRONTEND_PORT=${FRONTEND_PORT}
-BACKEND_PORT=${BACKEND_PORT}
-DB_PORT=${DB_PORT}
-SSL_PORT=${SSL_PORT}
-
-# 域名/SSL
-DOMAIN=${DOMAIN:-}
-
-# 数据库
-DB_NAME=subforge
-DB_USER=subforge
-DB_PASSWORD=${DB_PASSWORD}
-DB_SSL_MODE=disable
-
-# JWT
-JWT_SECRET=${JWT_SECRET}
-JWT_EXPIRY=24h
-
-# 管理员
-ADMIN_USERNAME=${ADMIN_USERNAME}
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-
-# 其他
-CORS_ORIGINS=
-ADMIN_IP_WHITELIST=
-GIN_MODE=release
-EOF
-    fi
-
-    log "配置已生成"
-}
-
-build_frontend() {
-    if docker image inspect subforge-frontend:latest >/dev/null 2>&1; then
-        log "使用预构建前端镜像，跳过编译"
-        return
-    fi
-
-    info "编译前端..."
-    cd "$INSTALL_DIR/frontend"
-    docker run --rm \
-        -v "$(pwd):/app" \
-        -w /app \
-        node:20-alpine \
-        sh -c "npm config set registry https://registry.npmmirror.com && npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps && npm run build"
-    log "前端编译完成"
 }
 
 setup_ssl() {
@@ -480,7 +523,7 @@ setup_ssl() {
     cd "$INSTALL_DIR"
     mkdir -p proxy
 
-    cat > proxy/nginx.conf <<EOF
+    cat > proxy/nginx.conf <<'EOF'
 worker_processes auto;
 
 events {
@@ -488,217 +531,76 @@ events {
 }
 
 http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-    sendfile      on;
-    keepalive_timeout 65;
+    upstream backend {
+        server host.docker.internal:__BACKEND_PORT__;
+    }
 
-    # HTTPS server (端口 ${SSL_PORT} 映射到容器内 443)
     server {
-        listen 443 ssl;
-        server_name _;
+        listen 443 ssl http2;
+        server_name __DOMAIN__;
 
-        # SSL certificates
-        ssl_certificate /etc/nginx/certs/${DOMAIN}.pem;
-        ssl_certificate_key /etc/nginx/certs/${DOMAIN}.key;
+        ssl_certificate /etc/nginx/certs/fullchain.pem;
+        ssl_certificate_key /etc/nginx/certs/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
-        ssl_prefer_server_ciphers on;
 
-        # Security headers
-        add_header X-Frame-Options DENY always;
-        add_header X-Content-Type-Options nosniff always;
-        add_header X-XSS-Protection "1; mode=block" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-
-        # Hide server info
-        server_tokens off;
-
-        # Proxy to frontend nginx
         location / {
-            proxy_pass http://subforge-nginx:80;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_read_timeout 300s;
-            proxy_connect_timeout 60s;
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
         }
     }
 }
 EOF
 
-    log "代理配置已创建"
+    # Replace placeholders
+    sed -i "s/__DOMAIN__/$DOMAIN/g" proxy/nginx.conf
+    sed -i "s/__BACKEND_PORT__/$BACKEND_PORT/g" proxy/nginx.conf
 
-    # Now setup SSL
-    if [ "$SSL_PROVIDER" = "2" ] && [ -n "$ALI_AK" ] && [ -n "$ALI_SK" ]; then
-        setup_aliyun_ssl
-    elif [ "$SSL_PROVIDER" = "1" ] && [ -n "$EMAIL" ]; then
-        setup_letsencrypt_ssl
+    # Create certs directory
+    mkdir -p certs
+
+    # Install acme.sh if not exists
+    if [ ! -f "$HOME/.acme.sh/acme.sh" ]; then
+        info "安装 acme.sh..."
+        curl -fsSL https://get.acme.sh | sh
+    fi
+
+    ACME_SH="$HOME/.acme.sh/acme.sh"
+
+    # Issue certificate
+    info "申请 SSL 证书..."
+    mkdir -p "$INSTALL_DIR/certs"
+
+    if [ "${SSL_PROVIDER:-}" = "2" ] && [ -n "$ALI_AK" ] && [ -n "$ALI_SK" ]; then
+        # Aliyun DNS API
+        $ACME_SH --issue --dns dns_ali -d "$DOMAIN" --home "$HOME/.acme.sh" 2>/dev/null || {
+            warn "证书申请失败"
+            return
+        }
+    elif [ "${SSL_PROVIDER:-}" = "1" ] && [ -n "$EMAIL" ]; then
+        # Let's Encrypt with webroot
+        $ACME_SH --issue -d "$DOMAIN" --webroot "$INSTALL_DIR/nginx" -k ec-256 --home "$HOME/.acme.sh" 2>/dev/null || {
+            warn "证书申请失败"
+            return
+        }
     else
         warn "跳过 SSL 配置"
+        return
     fi
 
-    # Start proxy if SSL certificates exist
-    if [ -f "$INSTALL_DIR/certs/${DOMAIN}/${DOMAIN}.pem" ] && [ -f "$INSTALL_DIR/certs/${DOMAIN}/${DOMAIN}.key" ]; then
-        info "启动域名代理..."
-        docker compose --profile proxy up -d
-        log "域名代理已启动"
-    fi
-}
+    # Install certificate
+    $ACME_SH --install-cert -d "$DOMAIN" --key-file "$INSTALL_DIR/certs/privkey.pem" --fullchain-file "$INSTALL_DIR/certs/fullchain.pem" --reloadcmd "docker restart subforge-proxy" 2>/dev/null
 
-setup_letsencrypt_ssl() {
-    info "使用 Let's Encrypt..."
-
-    # Install certbot
-    if ! command -v certbot &>/dev/null; then
-        warn "安装 certbot..."
-        if command -v apt-get &>/dev/null; then
-            apt-get update -qq
-            apt-get install -y -qq certbot python3-certbot-nginx
-        elif command -v yum &>/dev/null; then
-            yum install -y -q epel-release 2>/dev/null || true
-            yum install -y -q certbot python3-certbot-nginx
-        else
-            warn "无法自动安装 certbot"
-            return
-        fi
-    fi
-
-    # Stop services
-    docker compose down 2>/dev/null || true
-    sleep 3
-
-    # Free port 80
-    if lsof -i :80 >/dev/null 2>&1; then
-        fuser -k 80/tcp 2>/dev/null || true
-        sleep 2
-    fi
-
-    if certbot certonly --standalone \
-        -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive; then
-        log "SSL 证书申请成功"
-
-        # Create certificate directory for nginx
-        CERT_DIR="$INSTALL_DIR/ssl/${DOMAIN}"
-        mkdir -p "$CERT_DIR"
-
-        # Copy certificates from Let's Encrypt
-        cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "$CERT_DIR/${DOMAIN}.pem"
-        cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "$CERT_DIR/${DOMAIN}.key"
-
-        # Copy certificates for nginx proxy
-        mkdir -p "$INSTALL_DIR/certs"
-        cp "$CERT_DIR/${DOMAIN}.pem" "$INSTALL_DIR/certs/${DOMAIN}.pem"
-        cp "$CERT_DIR/${DOMAIN}.key" "$INSTALL_DIR/certs/${DOMAIN}.key"
-        chmod 644 "$INSTALL_DIR/certs/${DOMAIN}.pem"
-        chmod 600 "$INSTALL_DIR/certs/${DOMAIN}.key"
-
-        # Add DOMAIN to .env
-        if ! grep -q "^DOMAIN=" "$INSTALL_DIR/.env"; then
-            echo "DOMAIN=${DOMAIN}" >> "$INSTALL_DIR/.env"
-        else
-            sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" "$INSTALL_DIR/.env"
-        fi
-
-        # Start proxy with SSL
-        cd "$INSTALL_DIR"
-        docker compose --profile proxy up -d
-
-        # Setup auto-renewal
-        HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
-        mkdir -p "$HOOK_DIR"
-        cat > "$HOOK_DIR/restart-proxy.sh" <<'EOF'
-#!/bin/bash
-cd /opt/subforge && docker compose --profile proxy restart 2>/dev/null || true
-EOF
-        chmod +x "$HOOK_DIR/restart-proxy.sh"
-
-        CRON_LINE="0 3,15 * * * certbot renew --quiet --deploy-hook '/etc/letsencrypt/renewal-hooks/deploy/restart-proxy.sh'"
-        if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
-            (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
-        fi
-
-        log "SSL 配置完成!"
+    if [ -f "$INSTALL_DIR/certs/fullchain.pem" ]; then
+        log "SSL 证书安装完成"
     else
-        warn "SSL 证书申请失败，请确保域名已解析到本机 IP"
-    fi
-}
-
-setup_aliyun_ssl() {
-    info "使用阿里云 DNS API 自动申请 SSL 证书..."
-
-    # Create certificate directory
-    CERT_DIR="$INSTALL_DIR/ssl/${DOMAIN}"
-    mkdir -p "$CERT_DIR"
-
-    # Install acme.sh if not present
-    if ! command -v acme.sh &>/dev/null && [ ! -f ~/.acme.sh/acme.sh ]; then
-        info "安装 acme.sh..."
-        curl -fsSL https://get.acme.sh | sh -s email="$EMAIL"
-        source ~/.acme.sh/acme.sh.env 2>/dev/null || true
-    fi
-
-    # Register account if not registered
-    ACME_SH="$HOME/.acme.sh/acme.sh"
-    if [ ! -f "$ACME_SH" ]; then
-        ACME_SH="acme.sh"
-    fi
-
-    if ! "$ACME_SH" --list | grep -q "$EMAIL" 2>/dev/null; then
-        info "注册 acme.sh 账号..."
-        "$ACME_SH" --register-account -m "$EMAIL"
-    fi
-
-    # Configure Alibaba Cloud DNS API
-    info "配置阿里云 DNS API..."
-    export Ali_Key="$ALI_AK"
-    export Ali_Secret="$ALI_SK"
-
-    # Issue certificate using DNS API
-    info "申请 SSL 证书..."
-    $ACME_SH --issue \
-        --dns dns_ali \
-        -d "$DOMAIN" \
-        --force 2>&1 | tee /tmp/acme.log
-
-    if [ $? -eq 0 ] || grep -q "Success" /tmp/acme.log 2>/dev/null; then
-        log "SSL 证书申请成功!"
-
-        # Install certificate
-        info "安装证书..."
-        $ACME_SH --install-cert -d "$DOMAIN" \
-            --key-file "$CERT_DIR/${DOMAIN}.key" \
-            --fullchain-file "$CERT_DIR/${DOMAIN}.pem" 2>&1
-
-        if [ -f "$CERT_DIR/${DOMAIN}.pem" ] && [ -f "$CERT_DIR/${DOMAIN}.key" ]; then
-            log "证书已安装到: $CERT_DIR"
-
-            # Copy certificates for nginx proxy
-            mkdir -p "$INSTALL_DIR/certs"
-            cp "$CERT_DIR/${DOMAIN}.pem" "$INSTALL_DIR/certs/${DOMAIN}.pem"
-            cp "$CERT_DIR/${DOMAIN}.key" "$INSTALL_DIR/certs/${DOMAIN}.key"
-            chmod 644 "$INSTALL_DIR/certs/${DOMAIN}.pem"
-            chmod 600 "$INSTALL_DIR/certs/${DOMAIN}.key"
-
-            # Add DOMAIN to .env
-            if ! grep -q "^DOMAIN=" "$INSTALL_DIR/.env"; then
-                echo "DOMAIN=${DOMAIN}" >> "$INSTALL_DIR/.env"
-            else
-                sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" "$INSTALL_DIR/.env"
-            fi
-
-            # Start proxy with SSL
-            cd "$INSTALL_DIR"
-            docker compose --profile proxy up -d
-
-            log "SSL 配置完成!"
-        else
-            warn "证书安装失败"
-        fi
-    else
-        warn "SSL 证书申请失败"
-        cat /tmp/acme.log 2>/dev/null
+        warn "证书安装失败"
     fi
 
     # Setup auto-renewal
@@ -743,159 +645,22 @@ install_cli() {
     fi
 }
 
-ensure_nginx_config() {
-    info "检查 Nginx 配置..."
-
-    # Create nginx directory if not exists
-    mkdir -p "$INSTALL_DIR/nginx"
-
-    # Create default nginx config if not exists
-    if [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf" ]; then
-        cat > "$INSTALL_DIR/nginx/nginx-python.conf" <<EOF
-worker_processes auto;
-
-events {
-    worker_connections 1024;
-}
-
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-    sendfile      on;
-    keepalive_timeout 65;
-    client_max_body_size 10m;
-
-    # Rate limiting
-    limit_req_zone \$binary_remote_addr zone=api:10m rate=30r/s;
-
-    # Gzip
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml;
-    gzip_min_length 1000;
-
-    server {
-        listen 80;
-        server_name _;
-
-        # Security headers
-        add_header X-Frame-Options DENY always;
-        add_header X-Content-Type-Options nosniff always;
-        add_header X-XSS-Protection "1; mode=block" always;
-
-        # Hide server info
-        server_tokens off;
-
-        # API reverse proxy
-        location /api/ {
-            limit_req zone=api burst=50 nodelay;
-            proxy_pass http://172.17.0.1:${BACKEND_PORT};
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_read_timeout 300s;
-        }
-
-        # Client subscription endpoint
-        location /sub/ {
-            limit_req zone=api burst=20 nodelay;
-            proxy_pass http://172.17.0.1:${BACKEND_PORT};
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-        }
-
-        # Frontend (static files)
-        location / {
-            root /usr/share/nginx/html;
-            try_files \$uri \$uri/ /index.html;
-        }
-    }
-}
-EOF
-        log "Nginx 配置已创建"
-    fi
-
-    # Always update nginx config with current BACKEND_PORT
-    sed -i "s|proxy_pass http://172.17.0.1:[^;]*;|proxy_pass http://172.17.0.1:${BACKEND_PORT};|g" "$INSTALL_DIR/nginx/nginx-python.conf" 2>/dev/null || true
-}
-
-check_containers() {
-    info "检查容器状态..."
-
-    # Check each container
-    local containers=("subforge-db" "subforge-backend" "subforge-nginx")
-    local all_healthy=true
-
-    for container in "${containers[@]}"; do
-        local status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "not found")
-        local health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "none")
-
-        if [ "$status" = "running" ]; then
-            if [ "$health" = "healthy" ] || [ "$health" = "none" ]; then
-                log "$container: 运行正常"
-            else
-                warn "$container: 运行中但健康检查失败 ($health)"
-                all_healthy=false
-            fi
-        else
-            warn "$container: 未运行 ($status)"
-            all_healthy=false
-        fi
-    done
-
-    if [ "$all_healthy" = true ]; then
-        log "所有容器运行正常"
-    else
-        warn "部分容器有问题，尝试重启..."
-        cd "$INSTALL_DIR"
-        docker compose down 2>/dev/null || true
-        sleep 2
-        docker compose up -d
-        sleep 5
-    fi
-}
-
-wait_health() {
-    info "等待服务就绪..."
-
-    local max=60
-    local count=0
-
-    while [ $count -lt $max ]; do
-        if curl -sf "http://localhost:${FRONTEND_PORT}/api/health" >/dev/null 2>&1; then
-            log "服务就绪 (${count}s)"
-            return
-        fi
-        sleep 2
-        count=$((count + 2))
-    done
-
-    warn "服务启动较慢，请检查日志: docker compose logs"
-}
-
 get_public_ip() {
-    local ip=""
-    for svc in "ifconfig.me" "ipinfo.io/ip" "icanhazip.com" "api.ipify.org"; do
-        ip=$(curl -s --connect-timeout 5 "https://${svc}" 2>/dev/null)
-        if echo "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "$ip"
-            return
-        fi
-    done
-    hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>"
+    curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || \
+    curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null || \
+    hostname -I | awk '{print $1}'
 }
 
 main() {
-    echo ""
-    echo -e "${CYAN}${BOLD}"
+    echo -e "${CYAN}"
     echo "  ____        _   _____                   "
     echo " / ___| _   _| | |  ___|___  _ __ ___    "
     echo " \___ \ | | | | | |_ / _ \| '__/ _ \   "
     echo "  ___) | |_| | | |  _| (_) | | |  __/   "
     echo " |____/ \__,_|_| |_|  \___/|_|  \___|   "
-    echo -e "${NC}"
-    echo -e "  ${BOLD}一键安装脚本 v${VERSION:-unknown}${NC}"
     echo ""
+    echo -e "  一键安装脚本 v${VERSION:-unknown}"
+    echo -e "${NC}"
 
     check_root
     detect_os
@@ -912,6 +677,7 @@ main() {
 
     # Setup project
     clone_repo
+    download_images
     ensure_nginx_config
     load_images
     generate_config
@@ -919,14 +685,6 @@ main() {
 
     # Start services
     start_services
-    wait_health
-    check_containers
-
-    # Setup SSL if domain provided
-    setup_ssl
-
-    # Final container check
-    check_containers
 
     # Install CLI tool
     install_cli
