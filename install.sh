@@ -684,11 +684,15 @@ start_services() {
         error "docker-compose.yml 不存在于 $(pwd)"
     fi
 
-    # Run docker compose
-    docker compose down --remove-orphans 2>/dev/null || true
-    docker compose up -d
+    # Get version info from VERSION file
+    APP_VERSION=$(cat VERSION 2>/dev/null || echo "unknown")
+    APP_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-    log "服务已启动"
+    # Run docker compose with version args
+    docker compose down --remove-orphans 2>/dev/null || true
+    VERSION=$APP_VERSION COMMIT=$APP_COMMIT docker compose up -d
+
+    log "服务已启动 (版本: $APP_VERSION)"
 }
 
 install_cli() {

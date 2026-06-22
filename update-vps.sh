@@ -42,7 +42,7 @@ echo -e "${YELLOW}[2/4] Pulling latest code...${NC}"
 ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "cd ${INSTALL_DIR} && git fetch origin main && git reset --hard origin/main"
 
 echo -e "${YELLOW}[3/4] Rebuilding and restarting...${NC}"
-ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "cd ${INSTALL_DIR} && docker compose down --remove-orphans && docker compose up -d --build"
+ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP} "cd ${INSTALL_DIR} && APP_VERSION=\$(cat VERSION 2>/dev/null || echo unknown) && APP_COMMIT=\$(git rev-parse --short HEAD 2>/dev/null || echo unknown) && docker compose down --remove-orphans && VERSION=\$APP_VERSION COMMIT=\$APP_COMMIT docker compose up -d --build"
 
 echo -e "${YELLOW}[4/4] Verifying...${NC}"
 sleep 5
