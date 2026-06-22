@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # 确保 VERSION 变量已定义
-VERSION="${VERSION:-1.2.4}"
+VERSION="${VERSION:-1.2.5}"
 
 # Support piped execution (curl | bash)
 if [ ! -t 0 ] && [ -e /dev/tty ]; then
@@ -24,7 +24,7 @@ NC='\033[0m'
 
 REPO="https://github.com/IceTears1/subforge.git"
 INSTALL_DIR="/opt/subforge"
-VERSION="1.2.4"  # 安装脚本版本
+VERSION="1.2.5"  # 安装脚本版本
 INSTALL_VERSION=""  # 用户指定安装的版本
 
 # Parse command line arguments
