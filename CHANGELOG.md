@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.0 (2026-06-22)
+
+### Features
+- **订阅格式化管道** — 添加过滤器和操作符系统，支持节点筛选和修改
+- **新增输出格式** — 支持 Surge、Loon、Quantumult X 配置导出
+- **过滤器系统** — 正则过滤、区域过滤、类型过滤、无用节点过滤
+- **操作符系统** — 设置属性、标志管理、排序、重命名、脚本修改、域名解析
+
+### Pipeline 模块
+- `pipeline/filters.py` — 过滤器基类和实现
+- `pipeline/operators.py` — 操作符基类和实现
+- `pipeline/pipeline.py` — 管道组合和配置解析
+
+### Exporters 模块
+- `exporters/surge.py` — Surge 配置生成
+- `exporters/loon.py` — Loon 配置生成
+- `exporters/qx.py` — Quantumult X 配置生成
+
 ## v1.3.3 (2026-06-22)
 
 ### Frontend
