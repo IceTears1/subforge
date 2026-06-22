@@ -31,6 +31,7 @@ from exporters import (
     generate_surge_config,
     generate_loon_config,
     generate_qx_config,
+    generate_shadowrocket_config,
 )
 
 # ─── Pipeline ─────────────────────────────────────────────────────────────────
@@ -513,6 +514,9 @@ def export_all_subscriptions(target: str = "clash", current_user: User = Depends
         media_type = "text/plain"
     elif target == "qx":
         content = generate_qx_config(all_nodes)
+        media_type = "text/plain"
+    elif target == "shadowrocket":
+        content = generate_shadowrocket_config(all_nodes)
         media_type = "text/plain"
     else:
         lines = []
