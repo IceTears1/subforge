@@ -1,8 +1,7 @@
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.orm import relationship
 from .database import Base
-from ..utils.time import get_current_time
+from utils.time import get_current_time
 
 
 class Subscription(Base):
@@ -22,6 +21,10 @@ class Subscription(Base):
     updated_at = Column(DateTime, default=get_current_time, onupdate=get_current_time)
 
     nodes = relationship("Node", back_populates="subscription", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_subscription_status", "status"),
+    )
 
     def __repr__(self):
         return f"<Subscription(id={self.id}, name={self.name})>"

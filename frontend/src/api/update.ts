@@ -1,17 +1,7 @@
 import api from './request'
+import type { VersionInfo, UpdateResult } from '../types'
 
-export interface VersionInfo {
-  current: string
-  current_tag: string
-  latest: string
-  latest_tag: string
-  has_update: boolean
-  changelog: string
-  last_check: string
-  update_mode: 'tag' | 'branch'
-  updating: boolean
-  last_update?: UpdateResult
-}
+export type { VersionInfo, UpdateResult }
 
 export interface Release {
   tag: string
@@ -25,21 +15,6 @@ export interface ChangelogEntry {
   hash: string
   message: string
   date: string
-}
-
-export interface UpdateStep {
-  name: string
-  status: 'pending' | 'running' | 'success' | 'failed'
-  message: string
-}
-
-export interface UpdateResult {
-  success: boolean
-  from: string
-  to: string
-  steps: UpdateStep[]
-  timestamp: string
-  error?: string
 }
 
 // 获取版本信息

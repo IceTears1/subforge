@@ -27,6 +27,22 @@ export function generateClashYaml(nodes: Node[]): string {
     } else if (node.node_type === 'ss') {
       proxy.cipher = config.method || config.cipher || 'aes-256-gcm'
       proxy.password = config.password || ''
+    } else if (node.node_type === 'hysteria2') {
+      proxy.password = config.password || ''
+      proxy.ports = config.ports || ''
+      if (config.obfs) {
+        proxy.obfs = config.obfs
+        proxy['obfs-password'] = config['obfs-password'] || ''
+      }
+    } else if (node.node_type === 'tuic') {
+      proxy.password = config.password || ''
+      proxy.uuid = config.uuid || ''
+      proxy['udp-relay'] = true
+    } else if (node.node_type === 'anytls') {
+      proxy.password = config.password || ''
+      if (config.sni) {
+        proxy.sni = config.sni
+      }
     }
 
     return proxy
@@ -71,6 +87,19 @@ export function generateSingboxJson(nodes: Node[]): string {
     } else if (node.node_type === 'ss') {
       outbound.method = config.method || config.cipher || 'aes-256-gcm'
       outbound.password = config.password || ''
+    } else if (node.node_type === 'hysteria2') {
+      outbound.password = config.password || ''
+      if (config.sni) {
+        outbound.tls = { enabled: true, server_name: config.sni }
+      }
+    } else if (node.node_type === 'tuic') {
+      outbound.password = config.password || ''
+      outbound.uuid = config.uuid || ''
+    } else if (node.node_type === 'anytls') {
+      outbound.password = config.password || ''
+      if (config.sni) {
+        outbound.tls = { enabled: true, server_name: config.sni }
+      }
     }
 
     return outbound
@@ -118,6 +147,24 @@ export function generateBase64(nodes: Node[]): string {
       const method = config.method || config.cipher || 'aes-256-gcm'
       const encoded = btoa(`${method}:${config.password}`)
       return `ss://${encoded}@${node.server}:${node.port}#${node.name}`
+    } else if (node.node_type === 'hysteria2') {
+      const params: string[] = []
+      if (config.sni) params.push(`sni=${config.sni}`)
+      if (config.obfs) params.push(`obfs=${config.obfs}`)
+      if (config['obfs-password']) params.push(`obfs-password=${config['obfs-password']}`)
+      const query = params.length ? `?${params.join('&')}` : ''
+      return `hysteria2://${config.password}@${node.server}:${node.port}${query}#${node.name}`
+    } else if (node.node_type === 'tuic') {
+      const params: string[] = []
+      if (config.uuid) params.push(`uuid=${config.uuid}`)
+      if (config.sni) params.push(`sni=${config.sni}`)
+      const query = params.length ? `?${params.join('&')}` : ''
+      return `tuic://${config.password}@${node.server}:${node.port}${query}#${node.name}`
+    } else if (node.node_type === 'anytls') {
+      const params: string[] = []
+      if (config.sni) params.push(`sni=${config.sni}`)
+      const query = params.length ? `?${params.join('&')}` : ''
+      return `anytls://${config.password}@${node.server}:${node.port}${query}#${node.name}`
     }
 
     return node.raw_uri || ''

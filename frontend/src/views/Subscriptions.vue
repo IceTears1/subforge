@@ -283,7 +283,7 @@ function openAdd() {
 
 function openEdit(sub: Subscription) {
   editingId.value = sub.id
-  form.value = { name: sub.name, url: sub.url, auto_refresh: sub.auto_refresh }
+  form.value = { name: sub.name, url: sub.url, auto_refresh: sub.auto_refresh || 3600 }
   showForm.value = true
 }
 

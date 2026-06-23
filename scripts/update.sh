@@ -35,7 +35,7 @@ cd "$INSTALL_DIR"
 
 # Read port from .env or use default
 if [ -f .env ]; then
-    PORT=$(grep -E '^FRONTEND_PORT=' .env | cut -d'=' -f2 | tr -d '[:space:]')
+    PORT=$(grep -E '^FRONTEND_PORT=' .env | cut -d'=' -f2- | tr -d '[:space:]')
 fi
 PORT=${PORT:-3001}
 

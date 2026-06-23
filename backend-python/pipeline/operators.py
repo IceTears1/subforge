@@ -126,23 +126,19 @@ class RegexDeleteOperator(BaseOperator):
 
 
 class ScriptOperator(BaseOperator):
-    """脚本操作符 - 用自定义脚本修改节点"""
+    """脚本操作符 - 已禁用 (存在安全风险)"""
 
     def __init__(self, script: str):
+        logger.warning("ScriptOperator is disabled for security reasons - ignoring script")
         self.script = script
 
     def operate(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        try:
-            # 创建安全的执行环境
-            local_vars = {"nodes": nodes, "re": re}
-            exec(self.script, {"__builtins__": {}}, local_vars)
-            return local_vars.get("nodes", nodes)
-        except Exception as e:
-            logger.error(f"Script operator error: {e}")
-            return nodes
+        # exec() removed due to RCE vulnerability - sandbox is trivially bypassable
+        logger.warning("ScriptOperator.operate() called but disabled - returning nodes unchanged")
+        return nodes
 
     def __repr__(self):
-        return "<ScriptOperator>"
+        return "<ScriptOperator(disabled)>"
 
 
 class DomainResolveOperator(BaseOperator):

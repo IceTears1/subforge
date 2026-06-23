@@ -1,7 +1,6 @@
-from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from .database import Base
-from ..utils.time import get_current_time
+from utils.time import get_current_time
 
 
 class APIKey(Base):

@@ -3,6 +3,14 @@ export interface User {
   id: number
   username: string
   role: string
+  status?: number
+  created_at?: string
+}
+
+// 登录参数
+export interface LoginParams {
+  username: string
+  password: string
 }
 
 // 登录结果
@@ -14,20 +22,25 @@ export interface LoginResult {
 // 订阅类型
 export interface Subscription {
   id: number
+  user_id?: number
   name: string
   url: string
-  token: string
+  token?: string
+  auto_refresh?: number
+  tags?: string[]
+  last_fetch: string | null
   node_count: number
   status: number
-  last_fetch: string | null
-  tags?: string[]
   created_at?: string
   updated_at?: string
+  nodes?: Node[]
 }
 
 // 节点类型
 export interface Node {
   id: number
+  subscription_id?: number
+  subscription_name?: string
   name: string
   display_name?: string
   node_type: string
@@ -36,8 +49,6 @@ export interface Node {
   region: string
   latency: number
   status: number
-  subscription_id: number
-  subscription_name?: string
   config_json?: Record<string, any>
   raw_uri?: string
 }
@@ -53,13 +64,31 @@ export interface ApiResponse<T> {
 export interface VersionInfo {
   current: string
   current_tag: string
-  current_commit: string
+  current_commit?: string
   latest: string
   latest_tag: string
   has_update: boolean
+  changelog?: string
   update_mode: 'tag' | 'branch'
   updating?: boolean
   last_check?: string
+  last_update?: UpdateResult
+}
+
+// 更新结果
+export interface UpdateStep {
+  name: string
+  status: 'pending' | 'running' | 'success' | 'failed'
+  message: string
+}
+
+export interface UpdateResult {
+  success: boolean
+  from: string
+  to: string
+  steps: UpdateStep[]
+  timestamp: string
+  error?: string
 }
 
 // 系统指标

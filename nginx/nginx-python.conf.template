@@ -37,7 +37,7 @@ http {
         # API reverse proxy (backend runs on host:BACKEND_PORT)
         location /api/ {
             limit_req zone=api burst=50 nodelay;
-            proxy_pass http://host.docker.internal:${BACKEND_PORT:-3002};
+            proxy_pass http://backend:${BACKEND_PORT};
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -49,7 +49,7 @@ http {
         # Client subscription endpoint
         location /sub/ {
             limit_req zone=api burst=20 nodelay;
-            proxy_pass http://host.docker.internal:${BACKEND_PORT:-3002};
+            proxy_pass http://backend:${BACKEND_PORT};
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

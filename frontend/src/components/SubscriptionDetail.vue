@@ -12,7 +12,7 @@
         </n-descriptions-item>
         <n-descriptions-item label="刷新间隔">{{ sub.auto_refresh }}秒</n-descriptions-item>
         <n-descriptions-item label="最后更新">{{ sub.last_fetch ? new Date(sub.last_fetch).toLocaleString() : '未更新' }}</n-descriptions-item>
-        <n-descriptions-item label="创建时间">{{ new Date(sub.created_at).toLocaleString() }}</n-descriptions-item>
+        <n-descriptions-item label="创建时间">{{ sub.created_at ? new Date(sub.created_at).toLocaleString() : '-' }}</n-descriptions-item>
         <n-descriptions-item label="标签">
           <n-space>
             <n-tag v-for="tag in (sub.tags || [])" :key="tag" size="small" :bordered="false">{{ tag }}</n-tag>

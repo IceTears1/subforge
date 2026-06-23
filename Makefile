@@ -38,7 +38,7 @@ clean:
 
 # Dev mode - backend
 dev-backend:
-	cd backend && go run ./cmd/server
+	cd backend-python && python3 app.py
 
 # Dev mode - frontend
 dev-frontend:
@@ -50,7 +50,7 @@ health:
 
 # View metrics
 metrics:
-	curl -s http://localhost:8080/api/metrics | jq .
+	curl -s http://localhost:3002/api/metrics | jq .
 
 # Deploy verification
 verify:

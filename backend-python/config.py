@@ -10,6 +10,7 @@ JWT_EXPIRY = os.getenv('JWT_EXPIRY', '24h')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*').split(',')
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 
 # 安全检查：启动时验证关键环境变量
 if JWT_SECRET == 'change-me-in-production':

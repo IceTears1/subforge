@@ -50,7 +50,7 @@ if [ -z "$VPS_IP" ]; then
     exit 1
 fi
 
-SSH_OPTS="-p ${VPS_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes"
+SSH_OPTS="-p ${VPS_PORT} -o ConnectTimeout=10 -o BatchMode=yes"
 SSH_CMD="ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP}"
 
 # If password provided, use sshpass
@@ -74,12 +74,14 @@ if [ -n "$VPS_PASS" ]; then
         echo -e "${RED}sshpass not found. Install it or use SSH key authentication.${NC}"
         exit 1
     fi
-    SSH_CMD="sshpass -p \"${VPS_PASS}\" ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP}"
+    # Use SSHPASS env var to avoid exposing password in process list
+    export SSHPASS="${VPS_PASS}"
+    SSH_CMD="sshpass -e ssh ${SSH_OPTS} ${VPS_USER}@${VPS_IP}"
 fi
 
 echo ""
 echo -e "${YELLOW}[1/6] Testing SSH connection to ${VPS_IP}...${NC}"
-if ! eval "${SSH_CMD} 'echo ok'" &>/dev/null; then
+if ! ${SSH_CMD} 'echo ok' &>/dev/null; then
     echo -e "${RED}SSH connection failed. Please check:${NC}"
     echo -e "  - VPS IP: ${VPS_IP}"
     echo -e "  - SSH User: ${VPS_USER}"
@@ -186,7 +188,7 @@ EOF
     echo "    Password: ${ADMIN_PASSWORD}"
     echo "  ========================================"
 else
-    ADMIN_PASSWORD=$(grep ADMIN_PASSWORD .env | cut -d'=' -f2)
+    ADMIN_PASSWORD=$(grep ADMIN_PASSWORD .env | cut -d'=' -f2-)
     echo "  .env exists"
 fi
 
@@ -199,14 +201,14 @@ echo "  Waiting for services..."
 WAIT_COUNT=0
 WAIT_MAX=30
 while [ $WAIT_COUNT -lt $WAIT_MAX ]; do
-    if curl -sf "http://localhost:3001/api/health" >/dev/null 2>&1; then
+    if curl -sf "http://localhost:${SERVICE_PORT:-3001}/api/health" >/dev/null 2>&1; then
         break
     fi
     sleep 2
     WAIT_COUNT=$((WAIT_COUNT + 1))
 done
 
-if curl -sf "http://localhost:3001/api/health" >/dev/null 2>&1; then
+if curl -sf "http://localhost:${SERVICE_PORT:-3001}/api/health" >/dev/null 2>&1; then
     PUBLIC_IP=$(curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || \
                 curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null || \
                 hostname -I | awk '{print $1}')
@@ -215,7 +217,7 @@ if curl -sf "http://localhost:3001/api/health" >/dev/null 2>&1; then
     echo "  SubForge deployed successfully!"
     echo "  ========================================"
     echo ""
-    echo "  URL:      http://${PUBLIC_IP}:3001"
+    echo "  URL:      http://${PUBLIC_IP}:${SERVICE_PORT:-3001}"
     echo "  Username: admin"
     echo "  Password: ${ADMIN_PASSWORD}"
     echo ""
@@ -237,14 +239,14 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT/__SERVICE_PORT__/$SERVICE_PORT}"
 echo -e "${YELLOW}Deploying to ${VPS_IP}...${NC}"
 echo ""
 
-eval "${SSH_CMD} 'bash -s'" <<< "$REMOTE_SCRIPT"
+${SSH_CMD} 'bash -s' <<< "$REMOTE_SCRIPT"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  VPS Deploy Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "  URL:  ${CYAN}http://${VPS_IP}:3001${NC}"
+echo -e "  URL:  ${CYAN}http://${VPS_IP}:${SERVICE_PORT:-3001}${NC}"
 echo ""
 echo -e "  ${YELLOW}Manage:${NC}"
 echo -e "    SSH:    ${CYAN}ssh -p ${VPS_PORT} ${VPS_USER}@${VPS_IP}${NC}"

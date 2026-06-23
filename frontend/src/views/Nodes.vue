@@ -118,12 +118,7 @@ const selectedSub = ref<number | string>('')
 const selectedRegion = ref<string | null>(null)
 const searchQuery = ref('')
 
-const exportFormatOptions = [
-  { label: 'Clash/Mihomo', value: 'clash' },
-  { label: 'sing-box', value: 'singbox' },
-  { label: 'Base64', value: 'base64' },
-  { label: '纯文本', value: 'text' },
-]
+import { formatOptions as exportFormatOptions } from '@/constants/formats'
 
 const speedTestOptions = [
   { label: '延迟测试', key: 'latency' },
@@ -216,7 +211,7 @@ async function loadNodes() {
       }
       nodes.value = allNodes
     } else {
-      const res = await getNodes(selectedSub.value)
+      const res = await getNodes(Number(selectedSub.value))
       nodes.value = res.data || []
     }
     filterNodes()

@@ -15,7 +15,7 @@ INSTALL_DIR="/opt/subforge"
 
 # Read port from .env or use default
 if [ -f "$INSTALL_DIR/.env" ]; then
-    PORT=$(grep -E '^FRONTEND_PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2 | tr -d '[:space:]')
+    PORT=$(grep -E '^FRONTEND_PORT=' "$INSTALL_DIR/.env" | cut -d'=' -f2- | tr -d '[:space:]')
 fi
 PORT=${PORT:-3001}
 
@@ -64,8 +64,14 @@ if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     exit 0
 fi
 
+# Backup current state
+echo -e "${YELLOW}Creating backup of current state...${NC}"
+CURRENT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+git tag -f "backup-before-rollback" HEAD 2>/dev/null || true
+echo -e "  Current commit: ${CYAN}${CURRENT_COMMIT}${NC}"
+
 # Rollback
-echo -e "${YELLOW}[1/3] Rolling back...${NC}"
+echo -e "${YELLOW}[1/3] Rolling back to ${TARGET}...${NC}"
 git checkout -B main "$TARGET"
 
 echo -e "${YELLOW}[2/3] Rebuilding...${NC}"

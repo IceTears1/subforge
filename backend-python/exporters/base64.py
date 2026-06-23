@@ -20,18 +20,21 @@ def generate_base64_subscription(nodes: List[Dict[str, Any]]) -> str:
 
         node_type = node.get("node_type", node.get("type", ""))
         name = node.get("name", "Unknown")
+        display_name = node.get("display_name", name)
         server = node.get("server", "")
         port = node.get("port", 0)
+        raw_uri = node.get("raw_uri", "")
 
         try:
             if node_type == "vless":
                 uuid = config.get("id", config.get("uuid", ""))
 
-                # Check if we have raw params string
+                # Check if we have raw params string (from parsed subscription)
                 raw_params = config.get("params", "")
                 if raw_params:
                     query = raw_params
                 else:
+                    # Build params from individual fields
                     params = []
                     if config.get("tls") == "tls":
                         params.append("security=tls")
@@ -49,13 +52,14 @@ def generate_base64_subscription(nodes: List[Dict[str, Any]]) -> str:
                         params.append(f"flow={config['flow']}")
                     query = "&".join(params)
 
-                lines.append(f"vless://{uuid}@{server}:{port}?{query}#{name}")
+                display = config.get("ps", display_name or name or "Unknown")
+                lines.append(f"vless://{uuid}@{server}:{port}?{query}#{display}")
 
             elif node_type == "vmess":
                 vmess_config = {
                     "v": "2",
-                    "ps": name,
-                    "add": server,
+                    "ps": config.get("ps", display_name or name or "Unknown"),
+                    "add": config.get("add", server),
                     "port": str(port),
                     "id": config.get("id", ""),
                     "aid": str(config.get("aid", 0)),
@@ -85,13 +89,15 @@ def generate_base64_subscription(nodes: List[Dict[str, Any]]) -> str:
                         params.append(f"peer={config['peer']}")
                     query = "&".join(params)
 
-                lines.append(f"trojan://{password}@{server}:{port}?{query}#{name}")
+                display = config.get("ps", display_name or name or "Unknown")
+                lines.append(f"trojan://{password}@{server}:{port}?{query}#{display}")
 
             elif node_type == "ss":
                 method = config.get("method", config.get("cipher", "aes-256-gcm"))
                 password = config.get("password", "")
+                display = config.get("ps", display_name or name or "Unknown")
                 encoded = base64.b64encode(f"{method}:{password}".encode()).decode()
-                lines.append(f"ss://{encoded}@{server}:{port}#{name}")
+                lines.append(f"ss://{encoded}@{server}:{port}#{display}")
 
             elif node_type == "hysteria2":
                 password = config.get("password", "")
@@ -99,7 +105,13 @@ def generate_base64_subscription(nodes: List[Dict[str, Any]]) -> str:
                 if config.get("sni"):
                     params.append(f"sni={config['sni']}")
                 query = "&".join(params)
-                lines.append(f"hysteria2://{password}@{server}:{port}?{query}#{name}")
+                display = config.get("ps", display_name or name or "Unknown")
+                lines.append(f"hysteria2://{password}@{server}:{port}?{query}#{display}")
+
+            else:
+                # Fallback: use raw_uri if available
+                if raw_uri:
+                    lines.append(raw_uri)
 
         except Exception as e:
             logger.warning(f"Failed to generate URI for {name}: {e}")

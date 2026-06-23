@@ -1,8 +1,7 @@
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.orm import relationship
 from .database import Base
-from ..utils.time import get_current_time
+from utils.time import get_current_time
 
 
 class Node(Base):
@@ -23,6 +22,11 @@ class Node(Base):
     created_at = Column(DateTime, default=get_current_time)
 
     subscription = relationship("Subscription", back_populates="nodes")
+
+    __table_args__ = (
+        Index("idx_node_server_port_type", "server", "port", "node_type"),
+        Index("idx_node_status", "status"),
+    )
 
     def __repr__(self):
         return f"<Node(id={self.id}, name={self.name}, type={self.node_type})>"

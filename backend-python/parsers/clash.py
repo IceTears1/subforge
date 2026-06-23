@@ -3,6 +3,7 @@ import logging
 from urllib.parse import unquote
 import httpx
 from .common import detect_region
+from utils.security import is_safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ def parse_clash_yaml(content: str) -> list:
             for provider_name, provider in data['proxy-providers'].items():
                 provider_url = provider.get('url', '')
                 if provider_url:
+                    if not is_safe_url(provider_url):
+                        logger.warning(f"SSRF blocked: unsafe provider URL for {provider_name}")
+                        continue
                     logger.info(f"Fetching proxy-provider: {provider_name} from {provider_url}")
                     try:
                         provider_response = httpx.get(provider_url, timeout=30, follow_redirects=True)

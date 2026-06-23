@@ -23,6 +23,10 @@ generate_secret() {
     openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32
 }
 
+# Get version info
+VERSION=$(cat VERSION 2>/dev/null || echo "1.0.0")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 # Create .env if not exists
 if [ ! -f .env ]; then
     echo -e "${YELLOW}[1/4] Generating .env configuration...${NC}"
@@ -38,13 +42,12 @@ SSL_PORT=3003
 DB_NAME=subforge
 DB_USER=subforge
 DB_PASSWORD=${DB_PASSWORD}
-DB_SSL_MODE=disable
 JWT_SECRET=${JWT_SECRET}
 JWT_EXPIRY=24h
+ADMIN_USERNAME=admin
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 CORS_ORIGINS=
-ADMIN_IP_WHITELIST=
-GIN_MODE=release
+LOG_LEVEL=INFO
 EOF
     echo -e "${GREEN}  .env created${NC}"
     echo -e "${YELLOW}  Default admin password: ${ADMIN_PASSWORD}${NC}"
@@ -55,10 +58,10 @@ fi
 
 # Build and start
 echo -e "${YELLOW}[2/4] Building Docker images...${NC}"
-docker compose build --no-cache
+VERSION=${VERSION} COMMIT=${COMMIT} docker compose build --no-cache
 
 echo -e "${YELLOW}[3/4] Starting services...${NC}"
-docker compose up -d
+VERSION=${VERSION} COMMIT=${COMMIT} docker compose up -d
 
 # Wait for health
 echo -e "${YELLOW}[4/4] Waiting for services to be ready...${NC}"

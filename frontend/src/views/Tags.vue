@@ -16,7 +16,7 @@
           <n-card :bordered="false" class="tag-card">
             <n-space justify="space-between" align="center">
               <n-space align="center">
-                <n-tag :color="tag.color" :bordered="false">{{ tag.name }}</n-tag>
+                <n-tag :style="{ backgroundColor: tag.color + '20', color: tag.color, borderColor: tag.color + '40' }" :bordered="false">{{ tag.name }}</n-tag>
                 <n-text depth="3" style="font-size: 12px">{{ tag.count }} 个订阅</n-text>
               </n-space>
               <n-popconfirm @positive-click="handleDelete(tag.name)">

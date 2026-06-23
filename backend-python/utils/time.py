@@ -11,4 +11,4 @@ def get_current_time():
 
 def get_utc_time():
     """获取 UTC 时间"""
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)

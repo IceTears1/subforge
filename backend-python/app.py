@@ -1,31 +1,44 @@
 import os
-import sys
 import json
-import secrets
-import hashlib
-import re
-import logging
 import time
-import yaml
-import base64
+import logging
+import subprocess
+import socket
+import concurrent.futures
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
-from functools import lru_cache
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON, Index
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
-from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 import httpx
+
+# ─── Config ───────────────────────────────────────────────────────────────────
+from config import JWT_SECRET, ADMIN_PASSWORD, ADMIN_USERNAME, CORS_ORIGINS, LOG_LEVEL
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+from models.database import get_db, engine, SessionLocal, Base, init_db, migrate_database
+from models.user import User
+from models.subscription import Subscription
+from models.node import Node
+from models.apikey import APIKey
+from models.audit import AuditLog
+
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+from utils.auth import (
+    verify_password, get_password_hash, create_access_token,
+    security, get_current_user, require_admin
+)
+from utils.time import get_current_time
+from utils.security import is_safe_url
+
+# ─── Parsers ──────────────────────────────────────────────────────────────────
+from parsers import parse_vless, parse_vmess, parse_trojan, parse_ss, parse_hysteria2, parse_clash_yaml
 
 # ─── Exporters ────────────────────────────────────────────────────────────────
 from exporters import (
@@ -38,11 +51,7 @@ from exporters import (
     generate_shadowrocket_config,
 )
 
-# ─── Pipeline ─────────────────────────────────────────────────────────────────
-from pipeline import SubscriptionPipeline
-
 # ─── Logging ──────────────────────────────────────────────────────────────────
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -50,28 +59,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 结构化日志辅助函数
-def log_request(method: str, path: str, status_code: int, duration: float = 0):
-    """记录请求日志"""
-    logger.info(f"{method} {path} {status_code} {duration:.3f}s")
-
-def log_error(error: str, context: dict = None):
-    """记录错误日志"""
-    if context:
-        logger.error(f"{error} | {json.dumps(context, ensure_ascii=False)}")
-    else:
-        logger.error(error)
-
-# 东八区 (UTC+8)
 CST = timezone(timedelta(hours=8))
-
-def get_current_time():
-    """获取当前东八区时间"""
-    return datetime.now(CST)
-
-def get_utc_time():
-    """获取 UTC 时间"""
-    return datetime.utcnow()
 
 # ─── Simple Cache ─────────────────────────────────────────────────────────────
 class SimpleCache:
@@ -94,213 +82,7 @@ class SimpleCache:
     def delete(self, key):
         self.cache.pop(key, None)
 
-    def clear(self):
-        self.cache.clear()
-
-# 订阅导出缓存（5分钟过期）
 subscription_cache = SimpleCache(ttl_seconds=300)
-
-# ─── Config ───────────────────────────────────────────────────────────────────
-DATABASE_URL = f"postgresql://{os.getenv('DB_USER', 'subforge')}:{os.getenv('DB_PASSWORD', 'subforge123')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'subforge')}"
-JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
-JWT_EXPIRY = os.getenv('JWT_EXPIRY', '24h')
-ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
-ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-
-# 安全检查：启动时验证关键环境变量
-if JWT_SECRET == 'change-me-in-production':
-    logger.warning("⚠️  JWT_SECRET 使用默认值，请设置环境变量 JWT_SECRET")
-if ADMIN_PASSWORD == 'admin123':
-    logger.warning("⚠️  ADMIN_PASSWORD 使用默认值，请设置环境变量 ADMIN_PASSWORD")
-
-# ─── Database ─────────────────────────────────────────────────────────────────
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# ─── Models ───────────────────────────────────────────────────────────────────
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(64), unique=True, nullable=False)
-    password = Column(String(128), nullable=False)
-    role = Column(String(16), default="user")
-    status = Column(Integer, default=1)
-    created_at = Column(DateTime, default=get_current_time)
-    updated_at = Column(DateTime, default=get_current_time, onupdate=get_current_time)
-
-    def __repr__(self):
-        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
-
-class Subscription(Base):
-    __tablename__ = "subscriptions"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), index=True)
-    token = Column(String(32), unique=True, index=True)
-    name = Column(String(128), nullable=False)
-    url = Column(Text, nullable=False)
-    auto_refresh = Column(Integer, default=3600)
-    tags = Column(JSON, default=list)
-    last_fetch = Column(DateTime)
-    node_count = Column(Integer, default=0)
-    status = Column(Integer, default=1)
-    created_at = Column(DateTime, default=get_current_time)
-    updated_at = Column(DateTime, default=get_current_time, onupdate=get_current_time)
-    nodes = relationship("Node", back_populates="subscription", cascade="all, delete-orphan")
-
-    def __repr__(self):
-        return f"<Subscription(id={self.id}, name={self.name})>"
-
-class Node(Base):
-    __tablename__ = "nodes"
-    id = Column(Integer, primary_key=True, index=True)
-    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), index=True)
-    name = Column(String(256))
-    display_name = Column(String(256))
-    node_type = Column(String(32))
-    server = Column(String(256))
-    port = Column(Integer)
-    region = Column(String(64))
-    raw_uri = Column(Text)
-    config_json = Column(JSON)
-    latency = Column(Integer, default=0)
-    status = Column(Integer, default=1)
-    created_at = Column(DateTime, default=get_current_time)
-    subscription = relationship("Subscription", back_populates="nodes")
-
-    def __repr__(self):
-        return f"<Node(id={self.id}, name={self.name}, type={self.node_type})>"
-
-class APIKey(Base):
-    __tablename__ = "api_keys"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), index=True)
-    name = Column(String(128))
-    key = Column(String(64), unique=True, index=True)
-    status = Column(Integer, default=1)
-    created_at = Column(DateTime, default=get_current_time)
-
-    def __repr__(self):
-        return f"<APIKey(id={self.id}, name={self.name})>"
-
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True)
-    username = Column(String(64))
-    action = Column(String(32))
-    resource = Column(String(32))
-    detail = Column(Text)
-    ip = Column(String(64))
-    success = Column(Integer, default=1)
-    created_at = Column(DateTime, default=get_current_time, index=True)
-
-    def __repr__(self):
-        return f"<AuditLog(id={self.id}, action={self.action}, username={self.username})>"
-
-# ─── Create tables ────────────────────────────────────────────────────────────
-Base.metadata.create_all(bind=engine)
-
-# ─── Auto Migration ───────────────────────────────────────────────────────────
-def migrate_database():
-    """Auto-migrate database schema - add missing columns"""
-    try:
-        from sqlalchemy import inspect, text
-
-        inspector = inspect(engine)
-
-        # Check nodes table
-        if 'nodes' in inspector.get_table_names():
-            columns = [col['name'] for col in inspector.get_columns('nodes')]
-
-            with engine.connect() as conn:
-                if 'download_speed' not in columns:
-                    conn.execute(text("ALTER TABLE nodes ADD COLUMN download_speed DOUBLE PRECISION DEFAULT 0"))
-                    conn.commit()
-                    logger.info("Migration: Added nodes.download_speed column")
-
-                if 'download_speed_type' not in columns:
-                    conn.execute(text("ALTER TABLE nodes ADD COLUMN download_speed_type VARCHAR(20) DEFAULT ''"))
-                    conn.commit()
-                    logger.info("Migration: Added nodes.download_speed_type column")
-
-        logger.info("Database migration completed")
-    except Exception as e:
-        logger.warning(f"Migration warning: {e}")
-
-migrate_database()
-
-# ─── Security ─────────────────────────────────────────────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
-
-def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
-    # Convert sub to string for python-jose compatibility
-    if "sub" in to_encode:
-        to_encode["sub"] = str(to_encode["sub"])
-    expire = get_current_time() + timedelta(hours=24)
-    to_encode.update({"exp": expire.timestamp()})
-    return jwt.encode(to_encode, JWT_SECRET, algorithm="HS256")
-
-def generate_token() -> str:
-    return secrets.token_hex(16)
-
-# ─── Database dependency ──────────────────────────────────────────────────────
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# ─── Auth dependency ──────────────────────────────────────────────────────────
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        user_id_str = payload.get("sub")
-        if user_id_str is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        user_id = int(user_id_str)
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-def require_admin(current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin required")
-    return current_user
-
-# ─── Pydantic models ─────────────────────────────────────────────────────────
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-class SubscriptionCreate(BaseModel):
-    name: str
-    url: str
-    auto_refresh: int = 3600
-    tags: List[str] = []
-
-class ConvertRequest(BaseModel):
-    source_url: Optional[str] = None
-    source: Optional[str] = None
-    target: str = "clash"
-    rename: bool = True
-
-class NodeImportRequest(BaseModel):
-    uris: str
 
 # ─── Seed admin ───────────────────────────────────────────────────────────────
 def seed_admin():
@@ -320,96 +102,242 @@ def seed_admin():
     finally:
         db.close()
 
+# ─── Init DB ──────────────────────────────────────────────────────────────────
+init_db()
+migrate_database()
 seed_admin()
+
+# ─── Record start time ────────────────────────────────────────────────────────
+start_time = time.time()
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 app = FastAPI(title="SubForge API")
 
-# 速率限制
+# Rate limiting
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS 配置：允许所有来源（开发模式），生产环境应限制
-CORS_ORIGINS = os.getenv('CORS_ORIGINS', '*').split(',')
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=CORS_ORIGINS if CORS_ORIGINS != ['*'] else ['*'],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 请求大小限制（1MB）
+# Request size limit (1MB)
 @app.middleware("http")
 async def limit_request_size(request: Request, call_next):
     if request.headers.get("content-length"):
         content_length = int(request.headers["content-length"])
-        if content_length > 1024 * 1024:  # 1MB
-            return JSONResponse(
-                status_code=413,
-                content={"detail": "Request body too large"}
-            )
-    response = await call_next(request)
-    return response
+        if content_length > 1024 * 1024:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+    return await call_next(request)
 
-# 请求日志
+# Request logging
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    start_time = time.time()
+    start = time.time()
     response = await call_next(request)
-    duration = time.time() - start_time
-
-    # 记录非健康检查请求
+    duration = time.time() - start
     if request.url.path != "/api/health":
-        log_request(
-            method=request.method,
-            path=request.url.path,
-            status_code=response.status_code,
-            duration=duration
-        )
-
+        logger.info(f"{request.method} {request.url.path} {response.status_code} {duration:.3f}s")
     return response
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
-@app.get("/api/health")
-def health(db: Session = Depends(get_db)):
-    """健康检查端点"""
-    checks = {
-        "status": "ok",
-        "version": "unknown",
-        "timestamp": get_current_time().isoformat(),
+# ─── Pydantic models ─────────────────────────────────────────────────────────
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class SubscriptionCreate(BaseModel):
+    name: str
+    url: str
+    auto_refresh: int = 3600
+    tags: list[str] = []
+
+class ConvertRequest(BaseModel):
+    source_url: str | None = None
+    source: str | None = None
+    target: str = "clash"
+    rename: bool = True
+
+class NodeImportRequest(BaseModel):
+    uris: str
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+class APIKeyCreate(BaseModel):
+    name: str
+
+# ─── Helper: fetch subscription content ──────────────────────────────────────
+def _fetch_subscription_content(url: str) -> str | None:
+    """Fetch subscription content with cloudscraper fallback to httpx, with SSRF protection."""
+    if not is_safe_url(url):
+        raise HTTPException(status_code=400, detail="URL is not safe (SSRF blocked)")
+
+    content = None
+
+    # Method 1: cloudscraper (bypasses Cloudflare)
+    try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, timeout=60)
+        if response.status_code == 200:
+            content = response.text
+    except Exception as e:
+        logger.warning(f"cloudscraper failed: {e}")
+
+    # Method 2: httpx fallback
+    if content is None:
+        for attempt in range(3):
+            try:
+                response = httpx.get(url, timeout=60, follow_redirects=True)
+                if response.status_code == 200:
+                    content = response.text
+                    break
+            except Exception as e:
+                logger.warning(f"httpx attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    time.sleep(2)
+
+    return content
+
+def _parse_subscription_content(content: str) -> list[dict]:
+    """Parse subscription content into node dicts."""
+    # Try base64 decode
+    try:
+        decoded = __import__('base64').b64decode(content).decode('utf-8')
+    except Exception:
+        decoded = content
+
+    # Check if it's Clash YAML
+    is_clash_yaml = False
+    if 'proxies:' in content or 'proxy-providers:' in content:
+        is_clash_yaml = True
+    elif 'proxies:' in decoded or 'proxy-providers:' in decoded:
+        is_clash_yaml = True
+
+    if is_clash_yaml:
+        return parse_clash_yaml(content)
+
+    # Parse URI lines
+    nodes = []
+    for line in decoded.strip().split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        node = None
+        if line.startswith('vless://'):
+            node = parse_vless(line)
+        elif line.startswith('vmess://'):
+            node = parse_vmess(line)
+        elif line.startswith('trojan://'):
+            node = parse_trojan(line)
+        elif line.startswith('ss://'):
+            node = parse_ss(line)
+        elif line.startswith('hysteria2://'):
+            node = parse_hysteria2(line)
+        if node:
+            nodes.append(node)
+    return nodes
+
+def _save_nodes(db: Session, sub: Subscription, nodes: list[dict]):
+    """Save parsed nodes to database, replacing existing nodes."""
+    db.query(Node).filter(Node.subscription_id == sub.id).delete()
+    for node_data in nodes:
+        node = Node(
+            subscription_id=sub.id,
+            name=node_data.get('name', 'Unknown'),
+            display_name=node_data.get('name', 'Unknown'),
+            node_type=node_data.get('type', 'unknown'),
+            server=node_data.get('server', ''),
+            port=node_data.get('port', 0),
+            region=node_data.get('region', 'OTHER'),
+            config_json=node_data,
+            status=1
+        )
+        db.add(node)
+    sub.node_count = len(nodes)
+    sub.last_fetch = get_current_time()
+    db.commit()
+
+def _node_to_dict(node: Node) -> dict:
+    """Convert ORM Node to dict for exporters."""
+    return {
+        "name": node.name,
+        "display_name": node.display_name,
+        "node_type": node.node_type,
+        "server": node.server,
+        "port": node.port,
+        "region": node.region,
+        "config_json": node.config_json,
+        "raw_uri": node.raw_uri,
+        "latency": node.latency,
+        "status": node.status,
     }
 
-    # 检查版本
+def _get_export_content(nodes: list[Node], target: str) -> tuple[str, str]:
+    """Generate export content for given nodes and target format. Returns (content, media_type)."""
+    node_dicts = [_node_to_dict(n) for n in nodes]
+
+    if target in ("clash", "mihomo"):
+        return generate_clash_yaml(node_dicts), "text/yaml"
+    elif target == "singbox":
+        return generate_singbox_json(node_dicts), "application/json"
+    elif target == "base64":
+        return generate_base64_subscription(node_dicts), "text/plain"
+    elif target == "surge":
+        return generate_surge_config(node_dicts), "text/plain"
+    elif target == "loon":
+        return generate_loon_config(node_dicts), "text/plain"
+    elif target == "qx":
+        return generate_qx_config(node_dicts), "text/plain"
+    elif target == "shadowrocket":
+        return generate_shadowrocket_config(node_dicts), "text/plain"
+    else:
+        # Plain text fallback
+        lines = []
+        for n in nodes:
+            if n.node_type == "vless":
+                lines.append(f"vless://{n.server}:{n.port}")
+            elif n.node_type == "vmess":
+                lines.append(f"vmess://{n.server}:{n.port}")
+            elif n.node_type == "trojan":
+                lines.append(f"trojan://{n.server}:{n.port}")
+            elif n.node_type == "ss":
+                lines.append(f"ss://{n.server}:{n.port}")
+        return "\n".join(lines), "text/plain"
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/health")
+def health(db: Session = Depends(get_db)):
+    checks = {"status": "ok", "version": "unknown", "timestamp": get_current_time().isoformat()}
     try:
         with open('/app/VERSION', 'r') as f:
             checks["version"] = f.read().strip()
     except Exception:
         pass
-
-    # 检查数据库连接
     try:
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as e:
         checks["database"] = "error"
         checks["status"] = "degraded"
-        logger.warning(f"Health check: database error: {e}")
-
     return checks
 
 @app.post("/api/auth/login")
 @limiter.limit("5/minute")
 def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
-    # Get client IP from various headers
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
     if not client_ip:
         client_ip = request.headers.get("x-real-ip", "")
-    if not client_ip:
-        client_ip = request.headers.get("cf-connecting-ip", "")
-    if not client_ip:
-        client_ip = request.headers.get("x-forwarded", "")
     if not client_ip:
         client_ip = request.client.host if request.client else "unknown"
 
@@ -417,7 +345,6 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.username == req.username, User.status == 1).first()
     if not user or not verify_password(req.password, user.password):
-        # Log failed login
         audit = AuditLog(user_id=0, username=req.username, action="login", resource="auth", detail="login failed", ip=client_ip, success=0)
         db.add(audit)
         db.commit()
@@ -426,25 +353,15 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
 
     token = create_access_token({"sub": user.id, "role": user.role})
 
-    # Log successful login
     audit = AuditLog(user_id=user.id, username=user.username, action="login", resource="auth", detail="login success", ip=client_ip, success=1)
     db.add(audit)
     db.commit()
-    logger.info(f"Successful login for user: {req.username} from {client_ip}")
 
-    return {
-        "token": token,
-        "user": {"id": user.id, "username": user.username, "role": user.role}
-    }
+    return {"token": token, "user": {"id": user.id, "username": user.username, "role": user.role}}
 
 @app.get("/api/me")
 def get_me(current_user: User = Depends(get_current_user)):
     return {"id": current_user.id, "username": current_user.username, "role": current_user.role}
-
-class UserCreate(BaseModel):
-    username: str
-    password: str
-    role: str = "user"
 
 @app.get("/api/users")
 def list_users(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
@@ -453,17 +370,10 @@ def list_users(current_user: User = Depends(require_admin), db: Session = Depend
 
 @app.post("/api/users")
 def create_user(req: UserCreate, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    # Check if username exists
     existing = db.query(User).filter(User.username == req.username).first()
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
-
-    user = User(
-        username=req.username,
-        password=get_password_hash(req.password),
-        role=req.role,
-        status=1
-    )
+    user = User(username=req.username, password=get_password_hash(req.password), role=req.role, status=1)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -501,9 +411,6 @@ def delete_user(user_id: int, current_user: User = Depends(require_admin), db: S
     db.commit()
     return {"message": "deleted"}
 
-class APIKeyCreate(BaseModel):
-    name: str
-
 @app.get("/api/apikeys")
 def list_apikeys(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     apikeys = db.query(APIKey).filter(APIKey.user_id == current_user.id).all()
@@ -511,20 +418,12 @@ def list_apikeys(current_user: User = Depends(get_current_user), db: Session = D
 
 @app.post("/api/apikeys")
 def create_apikey(req: APIKeyCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Generate API key
     import secrets
     api_key = f"sf_{secrets.token_urlsafe(32)}"
-
-    key = APIKey(
-        user_id=current_user.id,
-        name=req.name,
-        key=api_key,
-        status=1
-    )
+    key = APIKey(user_id=current_user.id, name=req.name, key=api_key, status=1)
     db.add(key)
     db.commit()
     db.refresh(key)
-
     return {"id": key.id, "name": key.name, "key": api_key}
 
 @app.delete("/api/apikeys/{key_id}")
@@ -549,15 +448,8 @@ def list_subscriptions(page: int = 1, page_size: int = 20, current_user: User = 
 
 @app.post("/api/subscriptions")
 def create_subscription(req: SubscriptionCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sub = Subscription(
-        user_id=current_user.id,
-        token=generate_token(),
-        name=req.name,
-        url=req.url,
-        auto_refresh=req.auto_refresh,
-        tags=req.tags,
-        status=1
-    )
+    import secrets
+    sub = Subscription(user_id=current_user.id, token=secrets.token_hex(16), name=req.name, url=req.url, auto_refresh=req.auto_refresh, tags=req.tags, status=1)
     db.add(sub)
     db.commit()
     db.refresh(sub)
@@ -565,53 +457,9 @@ def create_subscription(req: SubscriptionCreate, current_user: User = Depends(ge
 
 @app.get("/api/subscriptions/export-all")
 def export_all_subscriptions(target: str = "clash", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    user_id = current_user.id
-
-    # 使用单个查询获取所有节点（避免 N+1 查询）
-    sub_ids = db.query(Subscription.id).filter(
-        Subscription.user_id == user_id,
-        Subscription.status == 1
-    ).subquery()
-
+    sub_ids = db.query(Subscription.id).filter(Subscription.user_id == current_user.id, Subscription.status == 1).subquery()
     all_nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
-
-    if target == "clash" or target == "mihomo":
-        content = generate_clash_yaml(all_nodes)
-        media_type = "text/yaml"
-    elif target == "singbox":
-        content = generate_singbox_json(all_nodes)
-        media_type = "application/json"
-    elif target == "base64":
-        content = generate_base64_subscription(all_nodes)
-        media_type = "text/plain"
-    elif target == "surge":
-        content = generate_surge_config(all_nodes)
-        media_type = "text/plain"
-    elif target == "loon":
-        content = generate_loon_config(all_nodes)
-        media_type = "text/plain"
-    elif target == "qx":
-        content = generate_qx_config(all_nodes)
-        media_type = "text/plain"
-    elif target == "shadowrocket":
-        content = generate_shadowrocket_config(all_nodes)
-        media_type = "text/plain"
-    else:
-        lines = []
-        for node in all_nodes:
-            if node.node_type == "vless":
-                lines.append(f"vless://{node.server}:{node.port}")
-            elif node.node_type == "vmess":
-                lines.append(f"vmess://{node.server}:{node.port}")
-            elif node.node_type == "trojan":
-                lines.append(f"trojan://{node.server}:{node.port}")
-            elif node.node_type == "ss":
-                lines.append(f"ss://{node.server}:{node.port}")
-
-        content = "\n".join(lines)
-        media_type = "text/plain"
-
-    from fastapi.responses import PlainTextResponse
+    content, media_type = _get_export_content(all_nodes, target)
     return PlainTextResponse(content, media_type=media_type)
 
 @app.get("/api/subscriptions/{sub_id}")
@@ -631,11 +479,8 @@ def delete_subscription(sub_id: int, current_user: User = Depends(get_current_us
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
-
-    # Log
     audit = AuditLog(user_id=current_user.id, username=current_user.username, action="delete", resource="subscription", detail=f"deleted: {sub.name}", ip="unknown", success=1)
     db.add(audit)
-
     db.delete(sub)
     db.commit()
     return {"message": "deleted"}
@@ -645,115 +490,29 @@ def update_subscription(sub_id: int, req: SubscriptionCreate, current_user: User
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
-
     sub.name = req.name
     sub.url = req.url
     sub.auto_refresh = req.auto_refresh or 3600
     if req.tags:
-        import json as json_mod
-        sub.tags = json_mod.dumps(req.tags)
-
+        sub.tags = req.tags
     db.commit()
     return {"id": sub.id, "name": sub.name, "url": sub.url}
 
 @app.post("/api/subscriptions/refresh-all")
 def refresh_all_subscriptions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
-
     results = []
     for sub in subs:
         try:
-            # Reuse the refresh logic
-            import base64
-            import re
-
-            # Fetch content
-            content = None
-            try:
-                import cloudscraper
-                scraper = cloudscraper.create_scraper()
-                response = scraper.get(sub.url, timeout=60)
-                if response.status_code == 200:
-                    content = response.text
-            except Exception as e:
-                logger.warning(f"cloudscraper failed for {sub.name}: {e}")
-
-            if content is None:
-                for attempt in range(3):
-                    try:
-                        response = httpx.get(sub.url, timeout=60, follow_redirects=True)
-                        if response.status_code == 200:
-                            content = response.text
-                            break
-                    except Exception as e:
-                        logger.warning(f"httpx attempt {attempt + 1} failed for {sub.name}: {e}")
-
+            content = _fetch_subscription_content(sub.url)
             if content is None:
                 results.append({"id": sub.id, "name": sub.name, "status": "failed", "node_count": 0})
                 continue
-
-            # Parse nodes
-            try:
-                decoded = base64.b64decode(content).decode('utf-8')
-            except Exception:
-                decoded = content
-
-            # Check format
-            is_clash_yaml = 'proxies:' in content or 'proxy-providers:' in content
-            if is_clash_yaml:
-                nodes = parse_clash_yaml(content)
-            else:
-                nodes = []
-                for line in decoded.strip().split('\n'):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if line.startswith('vless://'):
-                        node = parse_vless(line)
-                        if node:
-                            nodes.append(node)
-                    elif line.startswith('vmess://'):
-                        node = parse_vmess(line)
-                        if node:
-                            nodes.append(node)
-                    elif line.startswith('trojan://'):
-                        node = parse_trojan(line)
-                        if node:
-                            nodes.append(node)
-                    elif line.startswith('ss://'):
-                        node = parse_ss(line)
-                        if node:
-                            nodes.append(node)
-                    elif line.startswith('hysteria2://'):
-                        node = parse_hysteria2(line)
-                        if node:
-                            nodes.append(node)
-
-            # Save to database
-            db.query(Node).filter(Node.subscription_id == sub.id).delete()
-            for node_data in nodes:
-                node = Node(
-                    subscription_id=sub.id,
-                    name=node_data.get('name', 'Unknown'),
-                    display_name=node_data.get('name', 'Unknown'),
-                    node_type=node_data.get('type', 'unknown'),
-                    server=node_data.get('server', ''),
-                    port=node_data.get('port', 0),
-                    region=node_data.get('region', 'OTHER'),
-                    config_json=node_data,
-                    status=1
-                )
-                db.add(node)
-
-            sub.node_count = len(nodes)
-            sub.last_fetch = get_current_time()
-            db.commit()
-
+            nodes = _parse_subscription_content(content)
+            _save_nodes(db, sub, nodes)
             results.append({"id": sub.id, "name": sub.name, "status": "success", "node_count": len(nodes)})
-
         except Exception as e:
             results.append({"id": sub.id, "name": sub.name, "status": "error", "error": str(e)})
-
     return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
 
 @app.post("/api/subscriptions/{sub_id}/refresh")
@@ -762,414 +521,64 @@ def refresh_subscription(sub_id: int, current_user: User = Depends(get_current_u
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    # 清除该订阅的缓存
+    # Clear cache
     for target in ["clash", "mihomo", "singbox", "base64", "plain"]:
         subscription_cache.delete(f"sub:{sub.token}:{target}")
 
-    # Log refresh start
     audit = AuditLog(user_id=current_user.id, username=current_user.username, action="refresh", resource="subscription", detail=f"refreshing: {sub.name}", ip="unknown", success=1)
     db.add(audit)
     db.commit()
 
     try:
-        # Fetch subscription content
-        import base64
-        import re
-
-        # Try multiple times with increasing timeout
-        content = None
-
-        # Method 1: Try cloudscraper first (bypasses Cloudflare)
-        try:
-            import cloudscraper
-            logger.info("Attempting cloudscraper...")
-            scraper = cloudscraper.create_scraper()
-            response = scraper.get(sub.url, timeout=60)
-            logger.info(f"cloudscraper status: {response.status_code}")
-            if response.status_code == 200:
-                content = response.text
-                logger.info(f"cloudscraper: Got content ({len(content)} bytes)")
-        except Exception as e:
-            logger.warning(f"cloudscraper failed: {e}")
-
-        # Method 2: Fallback to httpx
-        if content is None:
-            logger.info("Falling back to httpx...")
-            for attempt in range(3):
-                try:
-                    response = httpx.get(sub.url, timeout=60, follow_redirects=True)
-                    logger.info(f"httpx attempt {attempt + 1}: HTTP {response.status_code}")
-                    if response.status_code == 200:
-                        content = response.text
-                        break
-                except Exception as e:
-                    logger.info(f"httpx attempt {attempt + 1}: {e}")
-                    if attempt < 2:
-                        import time
-                        time.sleep(2)
-
+        content = _fetch_subscription_content(sub.url)
         if content is None:
             raise Exception("Failed to fetch subscription after 3 attempts")
 
-        logger.info(f"Fetched content length: {len(content)}")
+        nodes = _parse_subscription_content(content)
+        logger.info(f"Parsed {len(nodes)} nodes")
 
-        # Try to decode base64
-        try:
-            decoded = base64.b64decode(content).decode('utf-8')
-        except Exception:
-            decoded = content
-
-        # Parse nodes from decoded content
-        lines = decoded.strip().split('\n')
-        nodes = []
-
-        # Check if it's Clash YAML format (check both original and decoded)
-        is_clash_yaml = False
-        if 'proxies:' in content or 'proxy-providers:' in content:
-            is_clash_yaml = True
-            logger.info("Detected Clash YAML format in original content")
-        elif 'proxies:' in decoded or 'proxy-providers:' in decoded:
-            is_clash_yaml = True
-            logger.info("Detected Clash YAML format in decoded content")
-
-        if is_clash_yaml:
-            nodes = parse_clash_yaml(content)
-        else:
-            # Parse vless://, vmess://, trojan://, ss://, hysteria2://
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-
-                if line.startswith('vless://'):
-                    node = parse_vless(line)
-                    if node:
-                        nodes.append(node)
-                elif line.startswith('vmess://'):
-                    node = parse_vmess(line)
-                    if node:
-                        nodes.append(node)
-                elif line.startswith('trojan://'):
-                    node = parse_trojan(line)
-                    if node:
-                        nodes.append(node)
-                elif line.startswith('ss://'):
-                    node = parse_ss(line)
-                    if node:
-                        nodes.append(node)
-                elif line.startswith('hysteria2://'):
-                    node = parse_hysteria2(line)
-                    if node:
-                        nodes.append(node)
-
-        logger.info(f"Parsed {len(nodes)} nodes from {len(lines)} lines")
-
-        # Delete old nodes
-        db.query(Node).filter(Node.subscription_id == sub.id).delete()
-
-        # Add new nodes
-        for node_data in nodes:
-            node = Node(
-                subscription_id=sub.id,
-                name=node_data.get('name', 'Unknown'),
-                display_name=node_data.get('name', 'Unknown'),
-                node_type=node_data.get('type', 'unknown'),
-                server=node_data.get('server', ''),
-                port=node_data.get('port', 0),
-                region=node_data.get('region', 'OTHER'),
-                config_json=node_data,
-                status=1
-            )
-            db.add(node)
-
-        # Update subscription
-        sub.node_count = len(nodes)
-        sub.last_fetch = get_current_time()
-        db.commit()
-
+        _save_nodes(db, sub, nodes)
         return {"message": "refreshed", "node_count": len(nodes)}
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
-
-def parse_vless(line: str) -> dict:
-    """Parse vless:// link"""
-    try:
-        # vless://uuid@server:port?params#name
-        match = re.match(r'vless://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
-        if match:
-            uuid, server, port, params, name = match.groups()
-            from urllib.parse import unquote
-            name = unquote(name)
-            region = detect_region(server)
-            return {
-                'name': name,
-                'type': 'vless',
-                'server': server,
-                'port': int(port),
-                'region': region,
-                'uuid': uuid,
-                'params': params
-            }
-    except Exception:
-        pass
-    return None
-
-def parse_vmess(line: str) -> dict:
-    """Parse vmess:// link"""
-    try:
-        # vmess://base64encoded
-        match = re.match(r'vmess://(.+)', line)
-        if match:
-            decoded = base64.b64decode(match.group(1)).decode('utf-8')
-            data = json.loads(decoded)
-            server = data.get('add', '')
-            port = int(data.get('port', 0))
-            name = data.get('ps', 'Unknown')
-            from urllib.parse import unquote
-            name = unquote(name)
-            region = detect_region(server)
-            return {
-                'name': name,
-                'type': 'vmess',
-                'server': server,
-                'port': port,
-                'region': region,
-                'data': data
-            }
-        else:
-            logger.warning(f"vmess regex failed for: {line[:50]}")
-    except Exception as e:
-        logger.warning(f"vmess parse error: {e}")
-    return None
-
-def parse_trojan(line: str) -> dict:
-    """Parse trojan:// link"""
-    try:
-        # trojan://password@server:port?params#name
-        match = re.match(r'trojan://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
-        if match:
-            password, server, port, params, name = match.groups()
-            from urllib.parse import unquote
-            name = unquote(name)
-            region = detect_region(server)
-            return {
-                'name': name,
-                'type': 'trojan',
-                'server': server,
-                'port': int(port),
-                'region': region,
-                'password': password,
-                'params': params
-            }
-    except Exception:
-        pass
-    return None
-
-def parse_ss(line: str) -> dict:
-    """Parse ss:// link"""
-    try:
-        # ss://base64encoded@server:port#name
-        match = re.match(r'ss://([^@]+)@([^:]+):(\d+)#(.+)', line)
-        if match:
-            encoded, server, port, name = match.groups()
-            from urllib.parse import unquote
-            name = unquote(name)
-
-            # Decode base64 to get password and cipher
-            try:
-                decoded = base64.b64decode(encoded + '==').decode('utf-8')
-                if ':' in decoded:
-                    cipher, password = decoded.split(':', 1)
-                else:
-                    cipher = 'aes-256-gcm'
-                    password = decoded
-            except Exception:
-                cipher = 'aes-256-gcm'
-                password = encoded
-
-            region = detect_region(server)
-            return {
-                'name': name,
-                'type': 'ss',
-                'server': server,
-                'port': int(port),
-                'region': region,
-                'password': password,
-                'cipher': cipher
-            }
-        else:
-            logger.warning(f"ss regex failed for: {line[:50]}")
-    except Exception as e:
-        logger.warning(f"ss parse error: {e}")
-    return None
-
-def parse_hysteria2(line: str) -> dict:
-    """Parse hysteria2:// link"""
-    try:
-        # hysteria2://auth@server:port?params#name
-        match = re.match(r'hysteria2://([^@]+)@([^:]+):(\d+)\?(.+)#(.+)', line)
-        if match:
-            auth, server, port, params, name = match.groups()
-            from urllib.parse import unquote
-            name = unquote(name)
-            region = detect_region(server)
-            return {
-                'name': name,
-                'type': 'hysteria2',
-                'server': server,
-                'port': int(port),
-                'region': region,
-                'auth': auth,
-                'params': params
-            }
-    except Exception:
-        pass
-    return None
-
-def detect_region(server: str) -> str:
-    """Detect region from server address"""
-    server_lower = server.lower()
-    if 'hk' in server_lower or 'hongkong' in server_lower or 'hong kong' in server_lower:
-        return 'HK'
-    elif 'jp' in server_lower or 'japan' in server_lower:
-        return 'JP'
-    elif 'sg' in server_lower or 'singapore' in server_lower:
-        return 'SG'
-    elif 'us' in server_lower or 'usa' in server_lower or 'united states' in server_lower:
-        return 'US'
-    elif 'tw' in server_lower or 'taiwan' in server_lower:
-        return 'TW'
-    elif 'kr' in server_lower or 'korea' in server_lower:
-        return 'KR'
-    elif 'uk' in server_lower or 'united kingdom' in server_lower or 'britain' in server_lower:
-        return 'UK'
-    elif 'de' in server_lower or 'germany' in server_lower:
-        return 'DE'
-    else:
-        return 'OTHER'
-
-def parse_clash_yaml(content: str) -> list:
-    """Parse Clash/Mihomo YAML subscription format"""
-    nodes = []
-    try:
-        from urllib.parse import unquote
-        data = yaml.safe_load(content)
-        if not data:
-            return nodes
-
-        # Parse proxies directly
-        if 'proxies' in data:
-            for proxy in data['proxies']:
-                proxy_type = proxy.get('type', '').lower()
-                name = unquote(proxy.get('name', 'Unknown'))
-                server = proxy.get('server', '')
-                port = proxy.get('port', 0)
-
-                if not server or not port:
-                    continue
-
-                region = detect_region(server)
-                node = {
-                    'name': name,
-                    'type': proxy_type,
-                    'server': server,
-                    'port': int(port),
-                    'region': region,
-                    'data': proxy
-                }
-                nodes.append(node)
-
-        # Parse proxy-providers (fetch from URL)
-        if 'proxy-providers' in data:
-            for provider_name, provider in data['proxy-providers'].items():
-                provider_url = provider.get('url', '')
-                if provider_url:
-                    logger.info(f"Fetching proxy-provider: {provider_name} from {provider_url}")
-                    try:
-                        provider_response = httpx.get(provider_url, timeout=30, follow_redirects=True)
-                        if provider_response.status_code == 200:
-                            provider_data = yaml.safe_load(provider_response.text)
-                            if provider_data and 'proxies' in provider_data:
-                                for proxy in provider_data['proxies']:
-                                    proxy_type = proxy.get('type', '').lower()
-                                    name = unquote(proxy.get('name', 'Unknown'))
-                                    server = proxy.get('server', '')
-                                    port = proxy.get('port', 0)
-
-                                    if not server or not port:
-                                        continue
-
-                                    region = detect_region(server)
-                                    node = {
-                                        'name': name,
-                                        'type': proxy_type,
-                                        'server': server,
-                                        'port': int(port),
-                                        'region': region,
-                                        'data': proxy
-                                    }
-                                    nodes.append(node)
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch provider {provider_name}: {e}")
-
-    except Exception as e:
-        logger.error(f"Clash YAML parse error: {e}")
-
-    return nodes
 
 @app.get("/api/nodes/all")
 def get_all_nodes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get all nodes from all subscriptions for the current user"""
     subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
     sub_ids = [s.id for s in subs]
-
     if not sub_ids:
         return []
 
+    # Build subscription name lookup dict (O(1) instead of O(n*m))
+    sub_name_map = {s.id: s.name for s in subs}
     nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
     return [
         {
-            "id": n.id,
-            "name": n.name,
-            "display_name": n.display_name,
-            "node_type": n.node_type,
-            "server": n.server,
-            "port": n.port,
-            "region": n.region,
-            "latency": n.latency,
-            "status": n.status,
+            "id": n.id, "name": n.name, "display_name": n.display_name,
+            "node_type": n.node_type, "server": n.server, "port": n.port,
+            "region": n.region, "latency": n.latency, "status": n.status,
             "subscription_id": n.subscription_id,
-            "subscription_name": next((s.name for s in subs if s.id == n.subscription_id), "")
+            "subscription_name": sub_name_map.get(n.subscription_id, "")
         }
         for n in nodes
     ]
 
 @app.post("/api/nodes/import")
 def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Import individual node URIs (vmess://, vless://, trojan://, ss://, hysteria2://)"""
-    # Find or create "手动导入" subscription
-    sub = db.query(Subscription).filter(
-        Subscription.user_id == current_user.id,
-        Subscription.name == "手动导入"
-    ).first()
-
+    """Import individual node URIs"""
+    sub = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.name == "手动导入").first()
     if not sub:
-        sub = Subscription(
-            user_id=current_user.id,
-            token=generate_token(),
-            name="手动导入",
-            url="manual",
-            status=1
-        )
+        import secrets
+        sub = Subscription(user_id=current_user.id, token=secrets.token_hex(16), name="手动导入", url="manual", status=1)
         db.add(sub)
         db.commit()
         db.refresh(sub)
 
-    # Parse each line
     lines = [line.strip() for line in req.uris.strip().split('\n') if line.strip()]
     imported = 0
-
     for line in lines:
         try:
             node_data = None
@@ -1185,14 +594,12 @@ def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_curren
                 node_data = parse_hysteria2(line)
 
             if node_data:
-                # Check for duplicate server:port:type
                 existing = db.query(Node).filter(
                     Node.subscription_id == sub.id,
                     Node.server == node_data.get("server"),
                     Node.port == node_data.get("port"),
                     Node.node_type == node_data.get("type")
                 ).first()
-
                 if not existing:
                     node = Node(
                         subscription_id=sub.id,
@@ -1210,10 +617,7 @@ def import_nodes(req: NodeImportRequest, current_user: User = Depends(get_curren
         except Exception:
             continue
 
-    # Commit all nodes first
     db.commit()
-
-    # Update node count
     if imported > 0:
         sub.node_count = db.query(Node).filter(Node.subscription_id == sub.id).count()
         db.commit()
@@ -1233,7 +637,6 @@ def get_nodes(sub_id: int, region: str = None, current_user: User = Depends(get_
 
 @app.post("/api/subscriptions/{sub_id}/check")
 def check_subscription_health(sub_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Check health of nodes in a subscription"""
     sub = db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
@@ -1242,9 +645,6 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
     total = len(nodes)
     online = 0
     offline = 0
-
-    import socket
-    import concurrent.futures
 
     for node in nodes:
         try:
@@ -1258,7 +658,6 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
                 except Exception:
                     return False
 
-            # Test common ports
             test_ports = [node.port, 80, 443, 8080, 8443]
             is_online = False
 
@@ -1272,7 +671,6 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
                     except Exception:
                         pass
 
-            # Fallback: DNS resolution
             if not is_online:
                 try:
                     socket.gethostbyname(node.server)
@@ -1286,13 +684,11 @@ def check_subscription_health(sub_id: int, current_user: User = Depends(get_curr
             else:
                 offline += 1
                 node.status = 0
-
-        except Exception as e:
+        except Exception:
             offline += 1
             node.status = 0
 
     db.commit()
-
     return {"total": total, "online": online, "offline": offline}
 
 @app.post("/api/subscriptions/{sub_id}/nodes/speedtest")
@@ -1306,15 +702,10 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
 
     for node in nodes:
         try:
-            import socket
-            import time
-            import concurrent.futures
-
             def test_connection(port):
-                """Test TCP connection to a port"""
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(2)  # 2 second timeout per port
+                    sock.settimeout(2)
                     start_time = time.time()
                     result = sock.connect_ex((node.server, port))
                     end_time = time.time()
@@ -1325,7 +716,6 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
                 except Exception:
                     return None
 
-            # Try multiple ports in parallel
             test_ports = [node.port, 80, 443, 8080, 8443]
             latency = None
 
@@ -1341,73 +731,43 @@ def speedtest_nodes(sub_id: int, current_user: User = Depends(get_current_user),
 
             if latency is not None:
                 node.latency = latency
-                results.append({
-                    "id": node.id,
-                    "name": node.name,
-                    "latency": latency,
-                    "status": "success"
-                })
+                results.append({"id": node.id, "name": node.name, "latency": latency, "status": "success"})
             else:
-                # If no port responds, try DNS resolution as a fallback
                 try:
-                    import socket
                     socket.gethostbyname(node.server)
-                    node.latency = 999  # Mark as reachable but slow
-                    results.append({
-                        "id": node.id,
-                        "name": node.name,
-                        "latency": 999,
-                        "status": "success"
-                    })
+                    node.latency = 999
+                    results.append({"id": node.id, "name": node.name, "latency": 999, "status": "success"})
                 except Exception:
                     node.latency = -1
-                    results.append({
-                        "id": node.id,
-                        "name": node.name,
-                        "latency": -1,
-                        "status": "failed"
-                    })
-
-        except Exception as e:
+                    results.append({"id": node.id, "name": node.name, "latency": -1, "status": "failed"})
+        except Exception:
             node.latency = -1
             results.append({"id": node.id, "name": node.name, "latency": -1, "status": "error"})
 
-    # Save latency to database
     db.commit()
-
     return {"results": results, "total": len(results), "success": sum(1 for r in results if r["status"] == "success")}
 
 @app.post("/api/nodes/speedtest-all")
 def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Test latency for all nodes across all subscriptions"""
-    import socket
-    import time
-    import concurrent.futures
-
-    # Get all subscriptions for the current user
     subs = db.query(Subscription).filter(Subscription.user_id == current_user.id, Subscription.status == 1).all()
     sub_ids = [s.id for s in subs]
-
     if not sub_ids:
         return {"results": [], "total": 0, "success": 0}
 
-    # Get all nodes
     nodes = db.query(Node).filter(Node.subscription_id.in_(sub_ids)).all()
     results = []
 
     def test_node_latency(node):
-        """Test latency for a single node"""
         def test_connection(port):
-            """Test TCP connection to a port"""
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
-                start_time = time.time()
+                start = time.time()
                 result = sock.connect_ex((node.server, port))
-                end_time = time.time()
+                end = time.time()
                 sock.close()
                 if result == 0:
-                    return int((end_time - start_time) * 1000)
+                    return int((end - start) * 1000)
                 return None
             except Exception:
                 return None
@@ -1437,14 +797,12 @@ def speedtest_all_nodes(current_user: User = Depends(get_current_user), db: Sess
                 node.latency = -1
                 return {"id": node.id, "name": node.name, "latency": -1, "status": "failed"}
 
-    # 使用线程池并行测试所有节点
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(test_node_latency, node): node for node in nodes}
         for future in concurrent.futures.as_completed(futures, timeout=30):
             try:
-                result = future.result()
-                results.append(result)
-            except Exception as e:
+                results.append(future.result())
+            except Exception:
                 node = futures[future]
                 node.latency = -1
                 results.append({"id": node.id, "name": node.name, "latency": -1, "status": "failed"})
@@ -1458,11 +816,10 @@ def list_formats():
 
 @app.post("/api/convert")
 def convert(req: ConvertRequest):
-    # Simple base64 decode
-    import base64
+    import base64 as b64
     if req.source:
         try:
-            decoded = base64.b64decode(req.source).decode()
+            decoded = b64.b64decode(req.source).decode()
             return {"result": decoded, "format": "detected"}
         except Exception:
             return {"result": req.source, "format": "raw"}
@@ -1478,75 +835,30 @@ def get_subscription_public(token: str, target: str = "clash", db: Session = Dep
 
 @app.get("/sub/{token}/export")
 def export_subscription(token: str, target: str = "clash", db: Session = Depends(get_db)):
-    # 检查缓存
     cache_key = f"sub:{token}:{target}"
     cached = subscription_cache.get(cache_key)
     if cached:
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(cached, media_type="text/plain" if target == "base64" else "text/yaml" if target in ["clash", "mihomo"] else "application/json")
+        media_type = "text/plain" if target == "base64" else "text/yaml" if target in ["clash", "mihomo"] else "application/json"
+        return PlainTextResponse(cached, media_type=media_type)
 
     sub = db.query(Subscription).filter(Subscription.token == token, Subscription.status == 1).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
+    content, media_type = _get_export_content(nodes, target)
 
-    if target == "clash" or target == "mihomo":
-        content = generate_clash_yaml(nodes)
-        media_type = "text/yaml"
-    elif target == "singbox":
-        content = generate_singbox_json(nodes)
-        media_type = "application/json"
-    elif target == "base64":
-        content = generate_base64_subscription(nodes)
-        media_type = "text/plain"
-    elif target == "surge":
-        content = generate_surge_config(nodes)
-        media_type = "text/plain"
-    elif target == "loon":
-        content = generate_loon_config(nodes)
-        media_type = "text/plain"
-    elif target == "qx":
-        content = generate_qx_config(nodes)
-        media_type = "text/plain"
-    else:
-        lines = []
-        for node in nodes:
-            if node.node_type == "vless":
-                lines.append(f"vless://{node.server}:{node.port}")
-            elif node.node_type == "vmess":
-                lines.append(f"vmess://{node.server}:{node.port}")
-            elif node.node_type == "trojan":
-                lines.append(f"trojan://{node.server}:{node.port}")
-            elif node.node_type == "ss":
-                lines.append(f"ss://{node.server}:{node.port}")
-        content = "\n".join(lines)
-        media_type = "text/plain"
-
-    # 缓存结果
     subscription_cache.set(cache_key, content)
-
-    from fastapi.responses import PlainTextResponse
     return PlainTextResponse(content, media_type=media_type)
 
 @app.get("/sub/{token}/export/group")
-def export_subscription_by_group(
-    token: str,
-    target: str = "clash",
-    group_by: str = "region",
-    group_value: str = "",
-    db: Session = Depends(get_db)
-):
-    """Export subscription filtered by group (region/type/status)"""
-    from fastapi.responses import PlainTextResponse
-
+def export_subscription_by_group(token: str, target: str = "clash", group_by: str = "region", group_value: str = "", db: Session = Depends(get_db)):
     sub = db.query(Subscription).filter(Subscription.token == token, Subscription.status == 1).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     nodes = db.query(Node).filter(Node.subscription_id == sub.id).all()
 
-    # Filter nodes by group criteria
     if group_by == "region":
         nodes = [n for n in nodes if (n.region or "OTHER") == group_value]
     elif group_by == "type":
@@ -1558,500 +870,74 @@ def export_subscription_by_group(
     if not nodes:
         raise HTTPException(status_code=404, detail="No nodes found for this group")
 
-    if target == "clash" or target == "mihomo":
-        content = generate_clash_yaml(nodes)
-        media_type = "text/yaml"
-    elif target == "singbox":
-        content = generate_singbox_json(nodes)
-        media_type = "application/json"
-    elif target == "base64":
-        content = generate_base64_subscription(nodes)
-        media_type = "text/plain"
-    elif target == "surge":
-        content = generate_surge_config(nodes)
-        media_type = "text/plain"
-    elif target == "loon":
-        content = generate_loon_config(nodes)
-        media_type = "text/plain"
-    elif target == "qx":
-        content = generate_qx_config(nodes)
-        media_type = "text/plain"
-    else:
-        lines = []
-        for node in nodes:
-            if node.node_type == "vless":
-                lines.append(f"vless://{node.server}:{node.port}")
-            elif node.node_type == "vmess":
-                lines.append(f"vmess://{node.server}:{node.port}")
-            elif node.node_type == "trojan":
-                lines.append(f"trojan://{node.server}:{node.port}")
-            elif node.node_type == "ss":
-                lines.append(f"ss://{node.server}:{node.port}")
-        content = "\n".join(lines)
-        media_type = "text/plain"
-
+    content, media_type = _get_export_content(nodes, target)
     return PlainTextResponse(content, media_type=media_type)
-
-def generate_clash_yaml(nodes: list) -> str:
-    """Generate Clash/Mihomo YAML format"""
-    import yaml
-    import json
-    import uuid
-
-    proxies = []
-    proxy_names = []
-    name_count = {}
-
-    for node in nodes:
-        # Get full config from database
-        if node.config_json:
-            try:
-                config_data = json.loads(node.config_json) if isinstance(node.config_json, str) else node.config_json
-            except Exception:
-                config_data = {}
-        else:
-            config_data = {}
-
-        # Handle duplicate names by adding suffix
-        name = node.name
-        if name in name_count:
-            name_count[name] += 1
-            name = f"{name}_{name_count[name]}"
-        else:
-            name_count[name] = 1
-
-        proxy = {
-            "name": name,
-            "type": node.node_type,
-            "server": node.server,
-            "port": node.port,
-        }
-
-        if node.node_type == "vless":
-            # Check both direct and nested data field
-            proxy["uuid"] = config_data.get("uuid", config_data.get("data", {}).get("uuid", str(uuid.uuid4())))
-            proxy["udp"] = True
-
-            # Parse params string if exists
-            params_str = config_data.get("params", config_data.get("data", {}).get("params", ""))
-            params = {}
-            if params_str:
-                for param in params_str.split("&"):
-                    if "=" in param:
-                        key, value = param.split("=", 1)
-                        params[key] = value
-
-            # Fix server address - use host or sni if server is placeholder
-            server = node.server
-            if server in ["127.0.0.1", "0.0.0.0", "localhost"]:
-                server = params.get("host", params.get("sni", server))
-            proxy["server"] = server
-
-            # TLS settings
-            proxy["tls"] = config_data.get("tls", config_data.get("data", {}).get("tls", False))
-            if params.get("security") == "tls" or params.get("security") == "reality":
-                proxy["tls"] = True
-
-            if proxy["tls"]:
-                # Try sni first, then host, then server
-                servername = config_data.get("servername", config_data.get("data", {}).get("servername", ""))
-                if not servername:
-                    servername = params.get("sni", "")
-                if not servername:
-                    servername = params.get("host", "")
-                if not servername:
-                    servername = server
-                proxy["servername"] = servername
-
-            # Network settings
-            network = config_data.get("net", config_data.get("data", {}).get("net", params.get("type", "tcp")))
-            if network == "ws":
-                proxy["network"] = "ws"
-                proxy["ws-opts"] = config_data.get("ws-opts", config_data.get("data", {}).get("ws-opts", {"path": params.get("path", "/")}))
-            elif network == "grpc":
-                proxy["network"] = "grpc"
-                proxy["grpc-opts"] = config_data.get("grpc-opts", config_data.get("data", {}).get("grpc-opts", {"grpc-service-name": params.get("serviceName", "")}))
-            elif network == "h2":
-                proxy["network"] = "h2"
-
-            # Reality settings
-            if params.get("security") == "reality":
-                proxy["flow"] = params.get("flow", "xtls-rprx-vision")
-                proxy["client-fingerprint"] = params.get("fp", "chrome")
-                proxy["reality-opts"] = {
-                    "public-key": params.get("pbk", ""),
-                    "short-id": params.get("sid", "")
-                }
-                # Skip cert verify for reality
-                if params.get("insecure") == "0":
-                    proxy["skip-cert-verify"] = False
-                else:
-                    proxy["skip-cert-verify"] = True
-            else:
-                # Regular flow settings
-                flow = config_data.get("flow", config_data.get("data", {}).get("flow", params.get("flow", "")))
-                if flow:
-                    proxy["flow"] = flow
-
-            # Client fingerprint
-            fp = config_data.get("fp", config_data.get("data", {}).get("fp", params.get("fp", "")))
-            if fp:
-                proxy["client-fingerprint"] = fp
-
-        elif node.node_type == "vmess":
-            proxy["uuid"] = config_data.get("id", str(uuid.uuid4()))
-            proxy["alterId"] = config_data.get("aid", 0)
-            proxy["cipher"] = config_data.get("scy", "auto")
-            proxy["udp"] = True
-            # Network settings
-            net = config_data.get("net", "tcp")
-            if net == "ws":
-                proxy["network"] = "ws"
-                proxy["ws-opts"] = config_data.get("ws-opts", {"path": "/"})
-            elif net == "grpc":
-                proxy["network"] = "grpc"
-                proxy["grpc-opts"] = config_data.get("grpc-opts", {"grpc-service-name": ""})
-            elif net == "h2":
-                proxy["network"] = "h2"
-                proxy["h2-opts"] = config_data.get("h2-opts", {})
-            # TLS settings
-            if config_data.get("tls"):
-                proxy["tls"] = True
-                proxy["servername"] = config_data.get("host", node.server)
-
-        elif node.node_type == "trojan":
-            # Check both direct and nested data field
-            password = config_data.get("password", "")
-            if not password and "data" in config_data:
-                password = config_data["data"].get("password", "")
-            proxy["password"] = password
-            proxy["udp"] = True
-            proxy["sni"] = config_data.get("sni", config_data.get("data", {}).get("sni", node.server))
-            if config_data.get("skip-cert-verify") or config_data.get("data", {}).get("skip-cert-verify"):
-                proxy["skip-cert-verify"] = True
-
-        elif node.node_type == "ss":
-            # Check both direct and nested data field
-            password = config_data.get("password", "")
-            if not password and "data" in config_data:
-                password = config_data["data"].get("password", "")
-            proxy["password"] = password or "password"
-            proxy["cipher"] = config_data.get("cipher", config_data.get("data", {}).get("cipher", "aes-256-gcm"))
-            if config_data.get("udp") or config_data.get("data", {}).get("udp"):
-                proxy["udp"] = True
-
-        elif node.node_type == "hysteria2":
-            # Check both direct and nested data field
-            password = config_data.get("password", "")
-            if not password and "data" in config_data:
-                password = config_data["data"].get("password", "")
-            proxy["password"] = password
-            proxy["ports"] = config_data.get("ports", config_data.get("data", {}).get("ports", ""))
-            if config_data.get("obfs") or config_data.get("data", {}).get("obfs"):
-                proxy["obfs"] = config_data.get("obfs", config_data.get("data", {}).get("obfs", {}))
-                proxy["obfs-password"] = config_data.get("obfs-password", config_data.get("data", {}).get("obfs-password", ""))
-
-        elif node.node_type == "tuic":
-            # Check both direct and nested data field
-            password = config_data.get("password", "")
-            if not password and "data" in config_data:
-                password = config_data["data"].get("password", "")
-            proxy["password"] = password
-            proxy["udp-relay"] = True
-            if config_data.get("uuid"):
-                proxy["uuid"] = config_data["uuid"]
-            elif config_data.get("data", {}).get("uuid"):
-                proxy["uuid"] = config_data["data"]["uuid"]
-
-        elif node.node_type == "anytls":
-            # Check both direct and nested data field
-            password = config_data.get("password", "")
-            if not password and "data" in config_data:
-                password = config_data["data"].get("password", "")
-            proxy["password"] = password
-            proxy["udp"] = True
-            if config_data.get("sni"):
-                proxy["sni"] = config_data["sni"]
-            elif config_data.get("data", {}).get("sni"):
-                proxy["sni"] = config_data["data"]["sni"]
-
-        proxies.append(proxy)
-        proxy_names.append(name)
-
-    config = {
-        "proxies": proxies,
-        "proxy-groups": [
-            {
-                "name": "节点选择",
-                "type": "select",
-                "proxies": ["自动选择", "负载均衡", "DIRECT"] + proxy_names
-            },
-            {
-                "name": "自动选择",
-                "type": "url-test",
-                "proxies": proxy_names,
-                "url": "http://www.gstatic.com/generate_204",
-                "interval": 300,
-                "tolerance": 50
-            },
-            {
-                "name": "负载均衡",
-                "type": "load-balance",
-                "proxies": proxy_names,
-                "url": "http://www.gstatic.com/generate_204",
-                "interval": 300
-            }
-        ],
-        "rules": [
-            "GEOIP,CN,DIRECT",
-            "MATCH,节点选择"
-        ]
-    }
-
-    return yaml.dump(config, allow_unicode=True, default_flow_style=False)
-
-def generate_singbox_json(nodes: list) -> str:
-    """Generate sing-box JSON format"""
-    import json
-
-    outbounds = []
-    for node in nodes:
-        outbound = {
-            "type": node.node_type,
-            "tag": node.name,
-            "server": node.server,
-            "server_port": node.port,
-        }
-        if node.node_type == "vless":
-            outbound["flow"] = ""
-        elif node.node_type == "vmess":
-            outbound["security"] = "auto"
-        elif node.node_type == "trojan":
-            pass
-        elif node.node_type == "ss":
-            outbound["method"] = "aes-256-gcm"
-
-        outbounds.append(outbound)
-
-    config = {
-        "outbounds": [
-            {"type": "selector", "tag": "节点选择", "outbounds": ["自动选择"] + [n.name for n in nodes]},
-            {"type": "urltest", "tag": "自动选择", "outbounds": [n.name for n in nodes], "url": "http://www.gstatic.com/generate_204", "interval": "5m"}
-        ] + outbounds
-    }
-
-    return json.dumps(config, ensure_ascii=False, indent=2)
-
-def generate_base64_subscription(nodes: list) -> str:
-    """Generate base64 encoded subscription for Shadowrocket/V2Ray"""
-    import base64
-    import json
-    from urllib.parse import unquote, urlparse, parse_qs
-
-    lines = []
-    for node in nodes:
-        try:
-            config = node.config_json
-            if isinstance(config, str):
-                config = json.loads(config)
-
-            if node.node_type == "vless":
-                # vless://uuid@server:port?params#name
-                uuid = config.get("id", config.get("uuid", ""))
-
-                # Check if we have raw params string (from parsed subscription)
-                raw_params = config.get("params", "")
-                if raw_params:
-                    # Use the raw params string directly
-                    query = raw_params
-                else:
-                    # Build params from individual fields
-                    params = []
-                    if config.get("tls") == "tls":
-                        params.append("security=tls")
-                        if config.get("sni"):
-                            params.append(f"sni={config['sni']}")
-                    if config.get("net"):
-                        params.append(f"type={config['net']}")
-                    if config.get("path"):
-                        params.append(f"path={config['path']}")
-                    if config.get("host"):
-                        params.append(f"host={config['host']}")
-                    if config.get("fp"):
-                        params.append(f"fp={config['fp']}")
-                    if config.get("flow"):
-                        params.append(f"flow={config['flow']}")
-                    query = "&".join(params)
-
-                name = config.get("ps", node.name or node.display_name or "Unknown")
-                lines.append(f"vless://{uuid}@{node.server}:{node.port}?{query}#{name}")
-
-            elif node.node_type == "vmess":
-                # vmess://base64(json)
-                vmess_config = {
-                    "v": "2",
-                    "ps": config.get("ps", node.name or node.display_name or "Unknown"),
-                    "add": config.get("add", node.server),
-                    "port": str(node.port),
-                    "id": config.get("id", ""),
-                    "aid": str(config.get("aid", 0)),
-                    "net": config.get("net", "tcp"),
-                    "type": config.get("type", "none"),
-                    "host": config.get("host", ""),
-                    "path": config.get("path", ""),
-                    "tls": config.get("tls", ""),
-                    "sni": config.get("sni", ""),
-                    "alpn": config.get("alpn", ""),
-                    "fp": config.get("fp", ""),
-                }
-                vmess_json = json.dumps(vmess_config, separators=(',', ':'))
-                lines.append(f"vmess://{base64.b64encode(vmess_json.encode()).decode()}")
-
-            elif node.node_type == "trojan":
-                # trojan://password@server:port?params#name
-                password = config.get("password", "")
-
-                # Check if we have raw params string (from parsed subscription)
-                raw_params = config.get("params", "")
-                if raw_params:
-                    # Use the raw params string directly
-                    query = raw_params
-                else:
-                    # Build params from individual fields
-                    params = []
-                    if config.get("sni"):
-                        params.append(f"sni={config['sni']}")
-                    if config.get("peer"):
-                        params.append(f"peer={config['peer']}")
-                    query = "&".join(params)
-
-                name = config.get("ps", node.name or node.display_name or "Unknown")
-                lines.append(f"trojan://{password}@{node.server}:{node.port}?{query}#{name}")
-
-            elif node.node_type == "ss":
-                # ss://base64(method:password)@server:port#name
-                method = config.get("method", config.get("cipher", "aes-256-gcm"))
-                password = config.get("password", "")
-                name = config.get("ps", node.name or node.display_name or "Unknown")
-                encoded = base64.b64encode(f"{method}:{password}".encode()).decode()
-                lines.append(f"ss://{encoded}@{node.server}:{node.port}#{name}")
-
-            else:
-                # 尝试使用 raw_uri
-                if node.raw_uri:
-                    lines.append(node.raw_uri)
-
-        except Exception as e:
-            # 如果解析失败，跳过该节点
-            continue
-
-    content = "\n".join(lines)
-    return base64.b64encode(content.encode()).decode()
 
 @app.get("/api/metrics")
 def get_metrics(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    import time
-    import os
-
     users = db.query(User).count()
     subs = db.query(Subscription).count()
     nodes = db.query(Node).count()
 
-    # Get process memory
     process_memory_mb = 0
     try:
         with open('/proc/self/status', 'r') as f:
             for line in f:
                 if line.startswith('VmRSS:'):
-                    memory_kb = int(line.split()[1])
-                    process_memory_mb = memory_kb / 1024
+                    process_memory_mb = int(line.split()[1]) / 1024
                     break
     except Exception:
         pass
 
-    # Get system memory
     system_memory_mb = 0
     try:
         with open('/proc/meminfo', 'r') as f:
             for line in f:
                 if line.startswith('MemTotal:'):
-                    memory_kb = int(line.split()[1])
-                    system_memory_mb = memory_kb / 1024
+                    system_memory_mb = int(line.split()[1]) / 1024
                     break
     except Exception:
         pass
 
-    # Calculate uptime
-    global start_time
-    uptime = int(time.time() - start_time) if 'start_time' in globals() else 0
+    uptime = int(time.time() - start_time)
 
     return {
-        "users": users,
-        "subscriptions": subs,
-        "nodes": nodes,
+        "users": users, "subscriptions": subs, "nodes": nodes,
         "uptime_seconds": uptime,
-        "memory": {
-            "alloc_mb": round(process_memory_mb, 2),
-            "total_mb": round(system_memory_mb, 2)
-        },
-        "goroutines": 1,
-        "cpu_percent": 0,
-        "go_version": "Python 3.11",
-        "database": {
-            "users": users,
-            "subscriptions": subs,
-            "nodes": nodes
-        }
+        "memory": {"alloc_mb": round(process_memory_mb, 2), "total_mb": round(system_memory_mb, 2)},
+        "goroutines": 1, "cpu_percent": 0, "go_version": "Python 3.11",
+        "database": {"users": users, "subscriptions": subs, "nodes": nodes}
     }
-
-# Record start time
-import time
-start_time = time.time()
 
 @app.get("/api/version")
 def get_version():
-    # Read version from VERSION file
     try:
         with open('/app/VERSION', 'r') as f:
             version = f.read().strip()
     except Exception:
         version = "1.0.0"
-
-    return {
-        "version": version,
-        "name": "SubForge",
-        "description": "VPN 订阅链接统一转换平台",
-        "python_version": "3.11",
-        "fastapi_version": "0.109.0"
-    }
+    return {"version": version, "name": "SubForge", "description": "VPN 订阅链接统一转换平台", "python_version": "3.11", "fastapi_version": "0.109.0"}
 
 @app.get("/api/update/version")
 def get_update_version():
-    import subprocess
-
-    # Read version from VERSION file
     try:
         with open('/app/VERSION', 'r') as f:
             current_version = f.read().strip()
     except Exception:
         current_version = "1.0.0"
 
-    # Read commit hash from COMMIT file
     try:
         with open('/app/COMMIT', 'r') as f:
             current_commit = f.read().strip()
     except Exception:
         current_commit = ""
 
-    # 尝试从 GitHub 获取最新版本
     latest_version = current_version
     has_update = False
     try:
         result = subprocess.run(
             ["git", "ls-remote", "--tags", "--refs", "https://github.com/IceTears1/subforge.git"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
             tags = []
@@ -2061,31 +947,23 @@ def get_update_version():
                     if tag.startswith('v'):
                         tags.append(tag)
             if tags:
-                # 简单比较版本号
                 latest_tag = sorted(tags, key=lambda x: [int(p) for p in x[1:].split('.')], reverse=True)[0]
-                latest_version = latest_tag[1:]  # 移除 'v' 前缀
+                latest_version = latest_tag[1:]
                 has_update = latest_version != current_version
     except Exception as e:
         logger.warning(f"Failed to check latest version: {e}")
 
     return {
-        "current": current_version,
-        "current_tag": current_version,
+        "current": current_version, "current_tag": current_version,
         "current_commit": current_commit,
-        "latest": latest_version,
-        "latest_tag": latest_version,
-        "has_update": has_update,
-        "changelog": "",
+        "latest": latest_version, "latest_tag": latest_version,
+        "has_update": has_update, "changelog": "",
         "last_check": get_current_time().isoformat(),
-        "update_mode": "tag",
-        "updating": False
+        "update_mode": "tag", "updating": False
     }
 
 @app.get("/api/update/releases")
 def get_releases():
-    import subprocess
-
-    # Read current version
     try:
         with open('/app/VERSION', 'r') as f:
             current_version = f.read().strip()
@@ -2093,14 +971,10 @@ def get_releases():
         current_version = "1.0.0"
 
     releases = []
-
-    # 尝试从 GitHub 获取所有 release
     try:
         result = subprocess.run(
             ["git", "ls-remote", "--tags", "--refs", "https://github.com/IceTears1/subforge.git"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
             for line in result.stdout.strip().split('\n'):
@@ -2108,26 +982,12 @@ def get_releases():
                     tag = line.split('refs/tags/')[-1]
                     if tag.startswith('v'):
                         version = tag[1:]
-                        releases.append({
-                            "tag": tag,
-                            "commit_hash": "",
-                            "message": f"Version {version}",
-                            "date": "",
-                            "is_current": version == current_version
-                        })
+                        releases.append({"tag": tag, "commit_hash": "", "message": f"Version {version}", "date": "", "is_current": version == current_version})
     except Exception as e:
         logger.warning(f"Failed to fetch releases: {e}")
 
-    # 如果没有获取到，返回当前版本
     if not releases:
-        releases.append({
-            "tag": f"v{current_version}",
-            "commit_hash": "",
-            "message": f"Version {current_version}",
-            "date": "",
-            "is_current": True
-        })
-
+        releases.append({"tag": f"v{current_version}", "commit_hash": "", "message": f"Version {current_version}", "date": "", "is_current": True})
     return releases
 
 @app.get("/api/update/status")
@@ -2136,40 +996,21 @@ def get_update_status():
 
 @app.get("/api/update/changelog")
 def get_changelog():
-    return [
-        {
-            "hash": "latest",
-            "message": "Initial release",
-            "date": "2026-06-15"
-        }
-    ]
+    return [{"hash": "latest", "message": "Initial release", "date": "2026-06-15"}]
 
 @app.post("/api/update/latest")
 def update_to_latest(current_user: User = Depends(require_admin)):
-    """更新到最新版本"""
-    import subprocess
-    import os
-
     steps = []
     from_version = "unknown"
-
     try:
-        # 读取当前版本
         try:
             with open('/app/VERSION', 'r') as f:
                 from_version = f.read().strip()
         except Exception:
             pass
 
-        # Step 1: 拉取最新代码
         steps.append({"name": "拉取代码", "status": "running", "message": "正在拉取最新代码..."})
-        result = subprocess.run(
-            ["git", "pull", "origin", "main"],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
+        result = subprocess.run(["git", "pull", "origin", "main"], cwd="/opt/subforge", capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             steps[-1]["status"] = "success"
             steps[-1]["message"] = "代码已更新"
@@ -2178,7 +1019,6 @@ def update_to_latest(current_user: User = Depends(require_admin)):
             steps[-1]["message"] = f"拉取失败: {result.stderr}"
             return {"success": False, "from": from_version, "to": from_version, "steps": steps, "timestamp": get_current_time().isoformat()}
 
-        # Step 2: 读取新版本
         steps.append({"name": "检查版本", "status": "running", "message": "正在检查新版本..."})
         try:
             with open('/opt/subforge/VERSION', 'r') as f:
@@ -2188,22 +1028,9 @@ def update_to_latest(current_user: User = Depends(require_admin)):
         steps[-1]["status"] = "success"
         steps[-1]["message"] = f"版本: {from_version} → {to_version}"
 
-        # Step 3: 重建容器
         steps.append({"name": "重建容器", "status": "running", "message": "正在重建 Docker 容器..."})
-        result = subprocess.run(
-            ["docker", "compose", "down"],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        result = subprocess.run(
-            ["docker", "compose", "up", "-d", "--build"],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
+        subprocess.run(["docker", "compose", "down"], cwd="/opt/subforge", capture_output=True, text=True, timeout=60)
+        result = subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd="/opt/subforge", capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
             steps[-1]["status"] = "success"
             steps[-1]["message"] = "容器已重建并启动"
@@ -2213,47 +1040,28 @@ def update_to_latest(current_user: User = Depends(require_admin)):
             return {"success": False, "from": from_version, "to": to_version, "steps": steps, "timestamp": get_current_time().isoformat()}
 
         return {"success": True, "from": from_version, "to": to_version, "steps": steps, "timestamp": get_current_time().isoformat()}
-
     except Exception as e:
         logger.error(f"Update failed: {e}")
         return {"success": False, "from": from_version, "to": from_version, "steps": steps, "error": str(e), "timestamp": get_current_time().isoformat()}
 
 @app.post("/api/update/tag")
 def update_to_tag(req: dict, current_user: User = Depends(require_admin)):
-    """更新到指定版本"""
-    import subprocess
-
     tag = req.get("tag", "")
     if not tag:
         raise HTTPException(status_code=400, detail="Tag is required")
 
     steps = []
     from_version = "unknown"
-
     try:
-        # 读取当前版本
         try:
             with open('/app/VERSION', 'r') as f:
                 from_version = f.read().strip()
         except Exception:
             pass
 
-        # Step 1: 切换到指定 tag
         steps.append({"name": "切换版本", "status": "running", "message": f"正在切换到 {tag}..."})
-        result = subprocess.run(
-            ["git", "fetch", "--tags"],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        result = subprocess.run(
-            ["git", "checkout", tag],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        subprocess.run(["git", "fetch", "--tags"], cwd="/opt/subforge", capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["git", "checkout", tag], cwd="/opt/subforge", capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             steps[-1]["status"] = "success"
             steps[-1]["message"] = f"已切换到 {tag}"
@@ -2262,22 +1070,9 @@ def update_to_tag(req: dict, current_user: User = Depends(require_admin)):
             steps[-1]["message"] = f"切换失败: {result.stderr}"
             return {"success": False, "from": from_version, "to": tag, "steps": steps, "timestamp": get_current_time().isoformat()}
 
-        # Step 2: 重建容器
         steps.append({"name": "重建容器", "status": "running", "message": "正在重建 Docker 容器..."})
-        result = subprocess.run(
-            ["docker", "compose", "down"],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        result = subprocess.run(
-            ["docker", "compose", "up", "-d", "--build"],
-            cwd="/opt/subforge",
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
+        subprocess.run(["docker", "compose", "down"], cwd="/opt/subforge", capture_output=True, text=True, timeout=60)
+        result = subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd="/opt/subforge", capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
             steps[-1]["status"] = "success"
             steps[-1]["message"] = "容器已重建并启动"
@@ -2287,49 +1082,34 @@ def update_to_tag(req: dict, current_user: User = Depends(require_admin)):
             return {"success": False, "from": from_version, "to": tag, "steps": steps, "timestamp": get_current_time().isoformat()}
 
         return {"success": True, "from": from_version, "to": tag, "steps": steps, "timestamp": get_current_time().isoformat()}
-
     except Exception as e:
         logger.error(f"Update to tag failed: {e}")
         return {"success": False, "from": from_version, "to": tag, "steps": steps, "error": str(e), "timestamp": get_current_time().isoformat()}
 
 @app.post("/api/update/rollback")
 def rollback(req: dict, current_user: User = Depends(require_admin)):
-    """回滚到指定版本"""
     version = req.get("version", "")
     if not version:
         raise HTTPException(status_code=400, detail="Version is required")
-
-    # 复用 update_to_tag 逻辑
     return update_to_tag({"tag": version}, current_user)
 
 @app.get("/api/audit")
 def get_audit(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
     logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(100).all()
-
-    # Convert UTC to CST for display
     result = []
     for l in logs:
         created_at = l.created_at
         if created_at:
-            # Add UTC timezone and convert to CST
             created_at_utc = created_at.replace(tzinfo=timezone.utc)
             created_at_cst = created_at_utc.astimezone(CST)
             created_at_str = created_at_cst.strftime("%Y-%m-%d %H:%M:%S")
         else:
             created_at_str = ""
-
         result.append({
-            "id": l.id,
-            "user_id": l.user_id,
-            "username": l.username,
-            "action": l.action,
-            "resource": l.resource,
-            "detail": l.detail,
-            "ip": l.ip,
-            "success": l.success,
-            "created_at": created_at_str
+            "id": l.id, "user_id": l.user_id, "username": l.username,
+            "action": l.action, "resource": l.resource, "detail": l.detail,
+            "ip": l.ip, "success": l.success, "created_at": created_at_str
         })
-
     return {"logs": result}
 
 # ─── Run ──────────────────────────────────────────────────────────────────────

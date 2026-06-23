@@ -92,6 +92,8 @@ import { NCard, NSelect, NGrid, NGi, NDataTable, NTag, NSpace, NEmpty, NButton, 
 import { DownloadOutline, CopyOutline, OpenOutline } from '@vicons/ionicons5'
 import { getAllNodes } from '../api/subscription'
 import type { Node } from '../api/subscription'
+import { formatOptions as exportFormatOptions } from '@/constants/formats'
+import { generateClashYaml, generateSingboxJson, generateBase64 } from '@/utils/export'
 
 const message = useMessage()
 const isMobile = ref(window.innerWidth <= 768)
@@ -109,12 +111,6 @@ const groupOptions = [
   { label: '按协议', value: 'type' },
   { label: '按状态', value: 'status' },
   { label: '按订阅来源', value: 'subscription' },
-]
-
-const exportFormatOptions = [
-  { label: 'Clash / Mihomo (YAML)', value: 'clash' },
-  { label: 'sing-box (JSON)', value: 'singbox' },
-  { label: 'Base64', value: 'base64' },
 ]
 
 const regionEmoji: Record<string, string> = {
@@ -210,7 +206,12 @@ function exportCurrentGroup() {
     content = generateSingboxJson(groupNodes)
     filename = `subforge_${exportGroup.value.name}.json`
     mimeType = 'application/json'
+  } else if (exportFormat.value === 'base64') {
+    content = generateBase64(groupNodes)
+    filename = `subforge_${exportGroup.value.name}.txt`
+    mimeType = 'text/plain'
   } else {
+    // For surge, loon, qx, shadowrocket - fall back to base64 with raw URIs
     content = generateBase64(groupNodes)
     filename = `subforge_${exportGroup.value.name}.txt`
     mimeType = 'text/plain'
@@ -229,80 +230,6 @@ function exportCurrentGroup() {
 
   message.success(`已导出 ${exportGroup.value.name} (${groupNodes.length} 个节点)`)
   showExportModal.value = false
-}
-
-function generateClashYaml(nodes: Node[]): string {
-  const proxies = nodes.map(node => {
-    const base: any = {
-      name: node.display_name || node.name,
-      type: node.node_type,
-      server: node.server,
-      port: node.port,
-    }
-    return base
-  })
-
-  const proxyNames = proxies.map(p => p.name)
-
-  return `# SubForge 导出
-# 分组: ${exportGroup.value?.name}
-# 节点数: ${nodes.length}
-
-proxies:
-${proxies.map(p => `  - name: ${p.name}\n    type: ${p.type}\n    server: ${p.server}\n    port: ${p.port}`).join('\n')}
-
-proxy-groups:
-  - name: 节点选择
-    type: select
-    proxies:
-${proxyNames.map(n => `      - ${n}`).join('\n')}
-
-  - name: 自动选择
-    type: url-test
-    proxies:
-${proxyNames.map(n => `      - ${n}`).join('\n')}
-    url: http://www.gstatic.com/generate_204
-    interval: 300
-
-rules:
-  - MATCH,节点选择
-`
-}
-
-function generateSingboxJson(nodes: Node[]): string {
-  const outbounds = nodes.map(node => ({
-    tag: node.display_name || node.name,
-    type: node.node_type,
-    server: node.server,
-    server_port: node.port,
-  }))
-
-  return JSON.stringify({
-    outbounds: [
-      ...outbounds,
-      {
-        tag: "direct",
-        type: "direct"
-      }
-    ]
-  }, null, 2)
-}
-
-function generateBase64(nodes: Node[]): string {
-  const lines = nodes.map(node => {
-    if (node.node_type === 'vless') {
-      return `vless://${node.server}:${node.port}`
-    } else if (node.node_type === 'vmess') {
-      return `vmess://${node.server}:${node.port}`
-    } else if (node.node_type === 'trojan') {
-      return `trojan://${node.server}:${node.port}`
-    } else if (node.node_type === 'ss') {
-      return `ss://${node.server}:${node.port}`
-    }
-    return `${node.node_type}://${node.server}:${node.port}`
-  })
-
-  return btoa(lines.join('\n'))
 }
 
 async function loadAllNodes() {

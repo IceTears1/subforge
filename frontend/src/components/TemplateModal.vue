@@ -57,6 +57,7 @@ import { ref } from 'vue'
 import { NModal, NSpace, NAlert, NGrid, NGi, NCard, NIcon, NText, NTag, NDivider, NForm, NFormItem, NInput, NSelect, NButton } from 'naive-ui'
 import { CloudOutline, ShieldOutline, RocketOutline, GlobeOutline, WifiOutline, ServerOutline } from '@vicons/ionicons5'
 
+const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['update:show', 'create'])
 
 interface Template {

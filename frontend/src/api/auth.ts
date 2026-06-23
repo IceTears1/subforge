@@ -1,19 +1,7 @@
 import api from './request'
+import type { LoginParams, LoginResult } from '../types'
 
-export interface LoginParams {
-  username: string
-  password: string
-}
-
-export interface LoginResult {
-  token: string
-  expires_in: number
-  user: {
-    id: number
-    username: string
-    role: string
-  }
-}
+export type { LoginParams, LoginResult }
 
 export function login(params: LoginParams) {
   return api.post<LoginResult>('/auth/login', params)

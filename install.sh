@@ -1,8 +1,8 @@
 #!/bin/bash
-# SubForge One-Click Installer v1.4.7
+# SubForge One-Click Installer v1.4.8
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
-#   sudo bash install.sh -v 1.4.4
+#   sudo bash install.sh -v VERSION
 #   or: sudo bash install.sh
 #   or: sudo bash install.sh -v 1.3.0  (指定版本安装)
 
@@ -223,7 +223,7 @@ load_images() {
         fi
         log "后端镜像已加载: $(basename "$backend_image")"
     else
-        error "后端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.4"
+        error "后端镜像不存在！请使用指定版本安装: bash install.sh -v VERSION"
     fi
 
     local frontend_image=""
@@ -242,7 +242,7 @@ load_images() {
         fi
         log "前端镜像已加载: $(basename "$frontend_image")"
     else
-        error "前端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.4"
+        error "前端镜像不存在！请使用指定版本安装: bash install.sh -v VERSION"
     fi
 }
 
@@ -337,7 +337,7 @@ check_existing_install() {
 
         # 数据库密码一致性检测
         if [ -n "${DB_PASSWORD:-}" ] && docker ps | grep -q subforge-db; then
-            DB_ACTUAL_PASSWORD=$(docker exec subforge-db env 2>/dev/null | grep POSTGRES_PASSWORD | cut -d'=' -f2)
+            DB_ACTUAL_PASSWORD=$(docker exec subforge-db env 2>/dev/null | grep POSTGRES_PASSWORD | cut -d'=' -f2-)
             if [ -n "$DB_ACTUAL_PASSWORD" ] && [ "$DB_PASSWORD" != "$DB_ACTUAL_PASSWORD" ]; then
                 warn "数据库密码不一致！"
                 warn "  .env 密码: ${DB_PASSWORD:0:4}****"
@@ -475,6 +475,8 @@ interactive_config() {
             read -p "> " input
             ALI_AK="${input:-$ALI_AK}"
             echo -e "${YELLOW}阿里云 AccessKey Secret${NC}"
+            read -p "> " input
+            ALI_SK="${input:-$ALI_SK}"
         else
             # Let's Encrypt
             if [ -n "$EMAIL" ]; then

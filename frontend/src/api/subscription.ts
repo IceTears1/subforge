@@ -1,33 +1,7 @@
 import api from './request'
+import type { Subscription, Node } from '../types'
 
-export interface Subscription {
-  id: number
-  user_id: number
-  name: string
-  url: string
-  token?: string
-  auto_refresh: number
-  tags: string[]
-  last_fetch: string | null
-  node_count: number
-  status: number
-  created_at: string
-  nodes?: Node[]
-}
-
-export interface Node {
-  id: number
-  subscription_id: number
-  subscription_name?: string
-  name: string
-  display_name: string
-  node_type: string
-  server: string
-  port: number
-  region: string
-  latency: number
-  status: number
-}
+export type { Subscription, Node }
 
 export function getSubscriptions(page = 1, pageSize = 20) {
   return api.get('/subscriptions', { params: { page, page_size: pageSize } })
