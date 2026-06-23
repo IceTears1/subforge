@@ -17,3 +17,6 @@ pgdata/
 .vscode/
 *.swp
 *.swo
+
+# Docker 镜像文件（通过 GitHub Releases 分发）
+images/
