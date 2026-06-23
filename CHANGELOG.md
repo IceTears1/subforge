@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.4 (2026-06-23)
+
+### Changes
+- **清理 git 历史** — 移除大镜像文件，.git 从 573MB 减小到 336KB
+- **优化仓库结构** — 镜像通过 GitHub Releases 分发
+
 ## v1.4.3 (2026-06-23)
 
 ### Bug Fixes
