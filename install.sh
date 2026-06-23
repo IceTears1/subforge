@@ -576,30 +576,34 @@ EOF
     info "申请 SSL 证书..."
     mkdir -p "$INSTALL_DIR/certs"
 
+    local cert_success=false
+
     if [ "${SSL_PROVIDER:-}" = "2" ] && [ -n "$ALI_AK" ] && [ -n "$ALI_SK" ]; then
         # Aliyun DNS API
-        $ACME_SH --issue --dns dns_ali -d "$DOMAIN" --home "$HOME/.acme.sh" 2>/dev/null || {
-            warn "证书申请失败"
-            return
-        }
+        $ACME_SH --issue --dns dns_ali -d "$DOMAIN" --home "$HOME/.acme.sh" 2>/dev/null && cert_success=true
     elif [ "${SSL_PROVIDER:-}" = "1" ] && [ -n "$EMAIL" ]; then
         # Let's Encrypt with webroot
-        $ACME_SH --issue -d "$DOMAIN" --webroot "$INSTALL_DIR/nginx" -k ec-256 --home "$HOME/.acme.sh" 2>/dev/null || {
-            warn "证书申请失败"
-            return
-        }
-    else
-        warn "跳过 SSL 配置"
-        return
+        $ACME_SH --issue -d "$DOMAIN" --webroot "$INSTALL_DIR/nginx" -k ec-256 --home "$HOME/.acme.sh" 2>/dev/null && cert_success=true
     fi
 
-    # Install certificate
-    $ACME_SH --install-cert -d "$DOMAIN" --key-file "$INSTALL_DIR/certs/privkey.pem" --fullchain-file "$INSTALL_DIR/certs/fullchain.pem" --reloadcmd "docker restart subforge-proxy" 2>/dev/null
+    if [ "$cert_success" = true ]; then
+        # Install certificate
+        $ACME_SH --install-cert -d "$DOMAIN" --key-file "$INSTALL_DIR/certs/privkey.pem" --fullchain-file "$INSTALL_DIR/certs/fullchain.pem" --reloadcmd "docker restart subforge-proxy" 2>/dev/null
+    fi
+
+    # 检查证书是否存在，如果不存在则生成自签名证书
+    if [ ! -f "$INSTALL_DIR/certs/fullchain.pem" ] || [ ! -f "$INSTALL_DIR/certs/privkey.pem" ]; then
+        warn "SSL 证书不存在，生成自签名证书（临时使用）"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "$INSTALL_DIR/certs/privkey.pem" \
+            -out "$INSTALL_DIR/certs/fullchain.pem" \
+            -subj "/CN=$DOMAIN" 2>/dev/null
+    fi
 
     if [ -f "$INSTALL_DIR/certs/fullchain.pem" ]; then
-        log "SSL 证书安装完成"
+        log "SSL 证书配置完成"
     else
-        warn "证书安装失败"
+        warn "证书配置失败，将使用 HTTP 访问"
     fi
 
     # Setup auto-renewal
