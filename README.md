@@ -1,4 +1,4 @@
-# ⚡ SubForge v1.4.6
+# ⚡ SubForge v1.4.7
 
 VPN 订阅链接统一转换平台 — 一键部署，扁平化 UI，多账户支持
 
@@ -35,7 +35,7 @@ SSH 登录 VPS 后执行：
 curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
 
 # 运行安装
-sudo bash install.sh -v 1.4.6
+sudo bash install.sh -v 1.4.7
 ```
 
 ### 安装说明
