@@ -652,6 +652,30 @@ start_services() {
     docker compose down --remove-orphans 2>/dev/null || true
     VERSION=$APP_VERSION COMMIT=$APP_COMMIT docker compose up -d
 
+    # 等待服务启动
+    info "等待服务启动..."
+    sleep 5
+
+    # 检查容器状态
+    local failed_containers=""
+    for container in subforge-db subforge-backend subforge-nginx; do
+        local status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null)
+        if [ "$status" != "running" ] && [ "$status" != "healthy" ]; then
+            failed_containers="$failed_containers $container"
+        fi
+    done
+
+    if [ -n "$failed_containers" ]; then
+        warn "以下容器启动失败:$failed_containers"
+        echo ""
+        for container in $failed_containers; do
+            echo -e "${RED}=== $container 日志 ===${NC}"
+            docker logs --tail 20 "$container" 2>&1
+            echo ""
+        done
+        error "服务启动失败，请检查上述日志"
+    fi
+
     log "服务已启动 (版本: $APP_VERSION)"
 }
 
