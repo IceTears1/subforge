@@ -35,7 +35,7 @@ SSH 登录 VPS 后执行：
 curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
 
 # 运行安装
-sudo bash install.sh -v 1.4.7
+sudo bash install.sh -v 1.4.8
 ```
 
 ### 安装说明

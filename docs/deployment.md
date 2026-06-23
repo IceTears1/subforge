@@ -55,7 +55,14 @@
 ### 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
+# 下载安装脚本
+curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
+
+# 运行安装（指定版本）
+sudo bash install.sh -v 1.4.8
+
+# 或安装最新版本（不指定版本）
+sudo bash install.sh
 ```
 
 ### 手动 Docker 部署
@@ -134,8 +141,14 @@ volumes:
 # SSH 登录 VPS
 ssh root@your-vps-ip
 
-# 运行安装脚本
-curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash
+# 下载安装脚本
+curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
+
+# 运行安装（指定版本）
+sudo bash install.sh -v 1.4.8
+
+# 或安装最新版本（不指定版本）
+sudo bash install.sh
 ```
 
 ### 方式二：远程部署

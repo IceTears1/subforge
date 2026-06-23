@@ -229,7 +229,8 @@ if command -v gh &>/dev/null; then
 
 ### 安装命令
 \`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash -s -- -v ${VERSION}
+curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
+sudo bash install.sh -v ${VERSION}
 \`\`\`
 
 安装脚本会自动检测系统架构并下载对应的镜像。"
@@ -241,7 +242,8 @@ curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh 
 
 ### 安装命令
 \`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash -s -- -v ${VERSION}
+curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh
+sudo bash install.sh -v ${VERSION}
 \`\`\`"
     fi
 
@@ -268,5 +270,6 @@ echo -e "  ${YELLOW}GitHub Release:${NC}"
 echo -e "    https://github.com/IceTears1/subforge/releases/tag/v${VERSION}"
 echo ""
 echo -e "  ${YELLOW}安装命令:${NC}"
-echo -e "    curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh | sudo bash -s -- -v ${VERSION}"
+echo -e "    curl -fsSL https://raw.githubusercontent.com/IceTears1/subforge/main/install.sh -o install.sh"
+echo -e "    sudo bash install.sh -v ${VERSION}"
 echo ""
