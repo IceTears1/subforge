@@ -170,11 +170,40 @@ download_images() {
         img_version="v$(cat VERSION 2>/dev/null || echo 'latest')"
     fi
 
-    # Check if images already exist
-    local backend_img="images/subforge-backend-${img_version}.tar.gz"
-    local frontend_img="images/subforge-frontend-${img_version}.tar.gz"
+    # Detect architecture
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64)  arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *)             arch="amd64" ;;
+    esac
+    info "系统架构: $arch"
 
-    if [ -f "$backend_img" ] && [ -f "$frontend_img" ]; then
+    # Check if images already exist (try architecture-specific first, then fallback)
+    local backend_img=""
+    local frontend_img=""
+
+    # Try architecture-specific images first
+    local backend_img_arch="images/subforge-backend-${img_version}-${arch}.tar.gz"
+    local frontend_img_arch="images/subforge-frontend-${img_version}-${arch}.tar.gz"
+
+    # Try non-architecture images as fallback
+    local backend_img_legacy="images/subforge-backend-${img_version}.tar.gz"
+    local frontend_img_legacy="images/subforge-frontend-${img_version}.tar.gz"
+
+    if [ -f "$backend_img_arch" ]; then
+        backend_img="$backend_img_arch"
+    elif [ -f "$backend_img_legacy" ]; then
+        backend_img="$backend_img_legacy"
+    fi
+
+    if [ -f "$frontend_img_arch" ]; then
+        frontend_img="$frontend_img_arch"
+    elif [ -f "$frontend_img_legacy" ]; then
+        frontend_img="$frontend_img_legacy"
+    fi
+
+    if [ -n "$backend_img" ] && [ -n "$frontend_img" ]; then
         log "镜像已存在: $img_version"
         return
     fi
@@ -182,23 +211,37 @@ download_images() {
     # Try to download from GitHub Releases
     local release_url="https://github.com/IceTears1/subforge/releases/download/${img_version}"
 
-    if [ ! -f "$backend_img" ]; then
+    # Download backend image
+    if [ -z "$backend_img" ]; then
         info "下载后端镜像..."
-        if curl -fsSL "${release_url}/subforge-backend-${img_version}.tar.gz" -o "$backend_img" 2>/dev/null; then
+        # Try architecture-specific first
+        if curl -fsSL "${release_url}/subforge-backend-${img_version}-${arch}.tar.gz" -o "$backend_img_arch" 2>/dev/null; then
+            backend_img="$backend_img_arch"
+            log "后端镜像下载完成 (${arch})"
+        # Fallback to legacy format
+        elif curl -fsSL "${release_url}/subforge-backend-${img_version}.tar.gz" -o "$backend_img_legacy" 2>/dev/null; then
+            backend_img="$backend_img_legacy"
             log "后端镜像下载完成"
         else
             warn "后端镜像下载失败，将使用本地构建"
-            rm -f "$backend_img"
+            rm -f "$backend_img_arch" "$backend_img_legacy"
         fi
     fi
 
-    if [ ! -f "$frontend_img" ]; then
+    # Download frontend image
+    if [ -z "$frontend_img" ]; then
         info "下载前端镜像..."
-        if curl -fsSL "${release_url}/subforge-frontend-${img_version}.tar.gz" -o "$frontend_img" 2>/dev/null; then
+        # Try architecture-specific first
+        if curl -fsSL "${release_url}/subforge-frontend-${img_version}-${arch}.tar.gz" -o "$frontend_img_arch" 2>/dev/null; then
+            frontend_img="$frontend_img_arch"
+            log "前端镜像下载完成 (${arch})"
+        # Fallback to legacy format
+        elif curl -fsSL "${release_url}/subforge-frontend-${img_version}.tar.gz" -o "$frontend_img_legacy" 2>/dev/null; then
+            frontend_img="$frontend_img_legacy"
             log "前端镜像下载完成"
         else
             warn "前端镜像下载失败，将使用本地构建"
-            rm -f "$frontend_img"
+            rm -f "$frontend_img_arch" "$frontend_img_legacy"
         fi
     fi
 }
