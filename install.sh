@@ -505,7 +505,7 @@ ensure_nginx_config() {
     mkdir -p "$INSTALL_DIR/nginx"
 
     # Check if nginx config template exists
-    if [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf.template" ]; then
+    if [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf" ] && [ ! -f "$INSTALL_DIR/nginx/nginx-python.conf.template" ]; then
         warn "Nginx 配置模板不存在，将使用默认配置"
     fi
 }
