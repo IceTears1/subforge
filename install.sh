@@ -335,6 +335,24 @@ check_existing_install() {
             BACKEND_PORT=3002
         fi
 
+        # 数据库密码一致性检测
+        if [ -n "${DB_PASSWORD:-}" ] && docker ps | grep -q subforge-db; then
+            DB_ACTUAL_PASSWORD=$(docker exec subforge-db env 2>/dev/null | grep POSTGRES_PASSWORD | cut -d'=' -f2)
+            if [ -n "$DB_ACTUAL_PASSWORD" ] && [ "$DB_PASSWORD" != "$DB_ACTUAL_PASSWORD" ]; then
+                warn "数据库密码不一致！"
+                warn "  .env 密码: ${DB_PASSWORD:0:4}****"
+                warn "  数据库密码: ${DB_ACTUAL_PASSWORD:0:4}****"
+                echo ""
+                echo -e "${YELLOW}是否使用数据库当前密码? [Y/n]${NC}"
+                read -p "> " use_db_password
+                if [[ ! "$use_db_password" =~ ^[Nn]$ ]]; then
+                    DB_PASSWORD="$DB_ACTUAL_PASSWORD"
+                    sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=${DB_PASSWORD}/" "$INSTALL_DIR/.env"
+                    log "已更新 .env 密码"
+                fi
+            fi
+        fi
+
         echo -e "${YELLOW}是否使用已有配置和数据? [Y/n]${NC}"
         read -p "> " use_existing
         if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
