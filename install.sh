@@ -216,7 +216,7 @@ load_images() {
         docker load < "$backend_image"
         log "后端镜像已加载: $(basename "$backend_image")"
     else
-        warn "后端镜像不存在，将使用本地构建"
+        error "后端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.2"
     fi
 
     local frontend_image=""
@@ -230,7 +230,7 @@ load_images() {
         docker load < "$frontend_image"
         log "前端镜像已加载: $(basename "$frontend_image")"
     else
-        warn "前端镜像不存在，将使用本地构建"
+        error "前端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.2"
     fi
 }
 
@@ -279,19 +279,6 @@ EOF
     fi
 
     log "配置已生成"
-}
-
-build_frontend() {
-    if docker image inspect subforge-frontend:latest >/dev/null 2>&1; then
-        log "前端镜像已存在"
-        return
-    fi
-
-    info "构建前端镜像..."
-    cd "$INSTALL_DIR/frontend"
-    docker build -t subforge-frontend:latest .
-    cd "$INSTALL_DIR"
-    log "前端镜像构建完成"
 }
 
 check_existing_install() {
@@ -681,7 +668,6 @@ main() {
     ensure_nginx_config
     load_images
     generate_config
-    build_frontend
 
     # Start services
     start_services
