@@ -214,9 +214,14 @@ load_images() {
 
     if [ -n "$backend_image" ]; then
         docker load < "$backend_image"
+        # 获取加载的镜像名称并添加 latest 标签
+        local backend_img_name=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "subforge-backend:" | head -1)
+        if [ -n "$backend_img_name" ]; then
+            docker tag "$backend_img_name" subforge-backend:latest
+        fi
         log "后端镜像已加载: $(basename "$backend_image")"
     else
-        error "后端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.2"
+        error "后端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.4"
     fi
 
     local frontend_image=""
@@ -228,9 +233,14 @@ load_images() {
 
     if [ -n "$frontend_image" ]; then
         docker load < "$frontend_image"
+        # 获取加载的镜像名称并添加 latest 标签
+        local frontend_img_name=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "subforge-frontend:" | head -1)
+        if [ -n "$frontend_img_name" ]; then
+            docker tag "$frontend_img_name" subforge-frontend:latest
+        fi
         log "前端镜像已加载: $(basename "$frontend_image")"
     else
-        error "前端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.2"
+        error "前端镜像不存在！请使用指定版本安装: bash install.sh -v 1.4.4"
     fi
 }
 
